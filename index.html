@@ -901,31 +901,6 @@ function buildReport(R) {
 
   const mindsets = getMindsetAlignment(adapted.primary, adapted.secondary);
 
-  const quadDots = [
-    { label:'Work',     profile:contexts.work,     color:'#185FA5' },
-    { label:'Home',     profile:contexts.home,     color:'#BA7517' },
-    { label:'Leader',   profile:contexts.leader,   color:'#0C447C' },
-    { label:'Follower', profile:contexts.follower, color:'#D85A30' },
-    { label:'Pressure', profile:contexts.pressure, color:'#A32D2D' },
-    { label:'Others',   profile:contexts.others,   color:'#534AB7' },
-    { label:'Natural',  profile:natural,           color:'#1D9E75' },
-  ];
-
-  function dotXY(p) {
-    const t = (p.pct.D||0)+(p.pct.i||0)+(p.pct.S||0)+(p.pct.C||0) || 1;
-    let x = ((p.pct.i||0) - (p.pct.C||0)) / t;
-    let y = ((p.pct.D||0) - (p.pct.S||0)) / t;
-    const mag = Math.sqrt(x*x+y*y);
-    if (mag > 0) { const scale = Math.min(mag*1.8, 0.88); x = x/mag*scale; y = y/mag*scale; }
-    return { x: 190 + x*170, y: 190 - y*170 };
-  }
-
-  const dotsSVG = quadDots.map(d => {
-    const {x, y} = dotXY(d.profile);
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" fill="${d.color}" stroke="white" stroke-width="2"/>
-    <text x="${(x+13).toFixed(1)}" y="${(y+4).toFixed(1)}" font-size="10" font-weight="600" fill="${d.color}">${d.label}</text>`;
-  }).join('');
-
   const ctxCards = [
     ['At work',       contexts.work,     '#185FA5', '#E6F1FB'],
     ['At home',       contexts.home,     '#BA7517', '#FAEEDA'],
