@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DISC Assessment — Trident Talents</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue:      #185FA5;
+    --blue-dark: #0C447C;
+    --blue-pale: #E6F1FB;
+    --blue-mid:  #B5D4F4;
+    --amber:     #BA7517;
+    --amber-lt:  #FAEEDA;
+    --green:     #1D9E75;
+    --green-lt:  #EAF3DE;
+    --coral:     #D85A30;
+    --coral-lt:  #FAECE7;
+    --red:       #A32D2D;
+    --red-lt:    #FCEBEB;
+    --purple:    #534AB7;
+    --purple-lt: #EEEDFE;
+    --teal:      #0F6E56;
+    --teal-lt:   #E1F5EE;
+    --gray1:     #F8F8F7;
+    --gray2:     #EEEDE8;
+    --gray3:     #CCCCCC;
+    --gray4:     #888888;
+    --text:      #1A1A1A;
+    --text-mid:  #444444;
+    --text-lt:   #777777;
+    --border:    rgba(0,0,0,0.10);
+    --radius:    10px;
+    --radius-lg: 14px;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    background: var(--gray1);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.6;
+  }
+
+  /* ── NAV ─────────────────────────────────────────────────────────── */
+  .nav {
+    background: white;
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    height: 56px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .nav-logo { font-size: 15px; font-weight: 700; color: var(--blue-dark); letter-spacing: -.3px; }
+  .nav-logo span { color: var(--blue); font-weight: 400; }
+  .nav-right { margin-left: auto; font-size: 12px; color: var(--text-lt); }
+
+  /* ── CONTAINERS ──────────────────────────────────────────────────── */
+  .container { max-width: 680px; margin: 0 auto; padding: 32px 20px 80px; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* ── WELCOME SCREEN ──────────────────────────────────────────────── */
+  .welcome-hero {
+    background: var(--blue);
+    border-radius: var(--radius-lg);
+    padding: 40px 36px;
+    margin-bottom: 24px;
+    color: white;
+  }
+  .welcome-hero h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: -.4px; }
+  .welcome-hero p { font-size: 15px; color: var(--blue-mid); line-height: 1.7; }
+  .welcome-meta {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .meta-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+  }
+  .meta-card .num { font-size: 26px; font-weight: 700; color: var(--blue); }
+  .meta-card .lbl { font-size: 12px; color: var(--text-lt); margin-top: 2px; }
+  .welcome-info {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .welcome-info h3 { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+  .welcome-info ul { list-style: none; }
+  .welcome-info ul li {
+    font-size: 14px; color: var(--text-mid);
+    padding: 6px 0; border-bottom: 1px solid var(--gray2);
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .welcome-info ul li:last-child { border-bottom: none; }
+  .welcome-info ul li::before {
+    content: '';
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--blue); margin-top: 7px; flex-shrink: 0;
+  }
+  .btn-start {
+    width: 100%; padding: 16px;
+    background: var(--blue); color: white;
+    border: none; border-radius: var(--radius);
+    font-size: 16px; font-weight: 600;
+    cursor: pointer; transition: background .15s;
+  }
+  .btn-start:hover { background: var(--blue-dark); }
+
+  /* ── ASSESSMENT ──────────────────────────────────────────────────── */
+  .progress-wrap { margin-bottom: 20px; }
+  .progress-top { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-lt); margin-bottom: 6px; }
+  .progress-track { height: 5px; background: var(--gray2); border-radius: 3px; }
+  .progress-fill { height: 5px; border-radius: 3px; background: var(--blue); transition: width .3s; }
+
+  .sec-banner {
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    margin-bottom: 16px;
+  }
+  .sec-banner .sec-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 2px; }
+  .sec-banner .sec-title { font-size: 14px; font-weight: 500; }
+
+  .context-tag {
+    display: inline-block; font-size: 11px; font-weight: 600;
+    padding: 3px 11px; border-radius: 20px;
+    text-transform: uppercase; letter-spacing: .05em;
+    margin-bottom: 10px;
+  }
+  .q-num { font-size: 12px; color: var(--text-lt); margin-bottom: 4px; }
+  .q-text {
+    font-size: 18px; font-weight: 600; color: var(--text);
+    margin-bottom: 20px; line-height: 1.45; letter-spacing: -.2px;
+  }
+  .q-hint { font-size: 13px; color: var(--text-lt); font-style: italic; margin-bottom: 16px; line-height: 1.5; }
+
+  .option {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 14px 16px;
+    border: 1.5px solid var(--gray2);
+    border-radius: var(--radius);
+    margin-bottom: 10px;
+    cursor: pointer;
+    background: white;
+    transition: border-color .12s, background .12s;
+  }
+  .option:hover { border-color: var(--blue); background: var(--blue-pale); }
+  .option.selected { border-color: var(--blue); background: var(--blue-pale); }
+  .opt-letter {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--gray2); color: var(--text-lt);
+    font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+    transition: background .12s, color .12s;
+  }
+  .option.selected .opt-letter { background: var(--blue); color: white; }
+  .opt-text { font-size: 14px; color: var(--text); line-height: 1.55; }
+
+  .fc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .fc-opt {
+    padding: 18px 16px;
+    border: 1.5px solid var(--gray2);
+    border-radius: var(--radius);
+    cursor: pointer; text-align: center;
+    font-size: 14px; color: var(--text); line-height: 1.55;
+    background: white;
+    transition: border-color .12s, background .12s;
+  }
+  .fc-opt:hover { border-color: var(--blue); background: var(--blue-pale); }
+  .fc-opt.selected { border-color: var(--blue); background: var(--blue-pale); color: var(--blue-dark); font-weight: 600; }
+
+  .nav-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 24px;
+  }
+  .btn-back {
+    padding: 10px 22px;
+    border: 1.5px solid var(--gray3);
+    border-radius: var(--radius);
+    background: white; color: var(--text-mid);
+    font-size: 14px; cursor: pointer;
+    transition: border-color .12s;
+  }
+  .btn-back:hover { border-color: var(--text-mid); }
+  .btn-back:disabled { opacity: .35; cursor: not-allowed; }
+  .btn-next {
+    padding: 10px 28px;
+    border: none; border-radius: var(--radius);
+    background: var(--blue); color: white;
+    font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: background .12s;
+  }
+  .btn-next:hover { background: var(--blue-dark); }
+  .btn-next:disabled { opacity: .35; cursor: not-allowed; }
+  .q-counter { font-size: 13px; color: var(--text-lt); }
+
+  /* ── EMAIL GATE ──────────────────────────────────────────────────── */
+  .gate-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 36px 32px;
+    text-align: center;
+  }
+  .gate-icon {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: var(--blue-pale);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 20px;
+  }
+  .gate-icon svg { width: 30px; height: 30px; }
+  .gate-card h2 { font-size: 22px; font-weight: 700; margin-bottom: 8px; letter-spacing: -.3px; }
+  .gate-card p { font-size: 14px; color: var(--text-lt); margin-bottom: 24px; line-height: 1.6; }
+  .field-row { margin-bottom: 14px; text-align: left; }
+  .field-row label { font-size: 13px; font-weight: 600; color: var(--text-mid); display: block; margin-bottom: 5px; }
+  .field-row input {
+    width: 100%; padding: 12px 14px;
+    border: 1.5px solid var(--gray2); border-radius: var(--radius);
+    font-size: 14px; color: var(--text);
+    outline: none; transition: border-color .12s;
+    background: white;
+  }
+  .field-row input:focus { border-color: var(--blue); }
+  .btn-submit {
+    width: 100%; padding: 14px;
+    background: var(--blue); color: white;
+    border: none; border-radius: var(--radius);
+    font-size: 15px; font-weight: 600;
+    cursor: pointer; margin-top: 8px;
+    transition: background .12s;
+  }
+  .btn-submit:hover { background: var(--blue-dark); }
+  .privacy-note { font-size: 11px; color: var(--text-lt); margin-top: 12px; }
+
+  /* ── REPORT ──────────────────────────────────────────────────────── */
+  .report-hero {
+    background: var(--blue); border-radius: var(--radius-lg);
+    padding: 32px; margin-bottom: 24px;
+    display: flex; align-items: center; gap: 24px;
+  }
+  .report-badge {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: var(--blue-dark);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 38px; font-weight: 800; color: var(--blue-pale);
+    flex-shrink: 0;
+  }
+  .report-hero-txt h2 { font-size: 20px; font-weight: 700; color: white; margin-bottom: 6px; }
+  .report-hero-txt p { font-size: 13px; color: var(--blue-mid); line-height: 1.6; }
+  .style-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .style-pill {
+    font-size: 11px; padding: 3px 12px; border-radius: 20px;
+    background: var(--blue-dark); color: var(--blue-mid);
+    font-weight: 600; letter-spacing: .04em;
+  }
+
+  .r-section { margin-bottom: 32px; }
+  .r-section-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--text-lt);
+    padding-bottom: 8px; border-bottom: 1px solid var(--gray2);
+    margin-bottom: 16px;
+  }
+
+  .ctx-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 20px; }
+  .ctx-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px;
+  }
+  .ctx-card .cl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-lt); margin-bottom: 4px; }
+  .ctx-card .cs { font-size: 26px; font-weight: 800; margin-bottom: 2px; line-height: 1; }
+  .ctx-card .ci { font-size: 11px; color: var(--text-lt); }
+
+  .insight-box {
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    border-left: 3px solid var(--blue);
+    background: var(--blue-pale);
+  }
+  .insight-box.amber { border-left-color: var(--amber); background: var(--amber-lt); }
+  .insight-box.red   { border-left-color: var(--red);   background: var(--red-lt); }
+  .insight-box.green { border-left-color: var(--green);  background: var(--green-lt); }
+  .insight-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
+  .insight-body  { font-size: 13px; color: var(--text-mid); line-height: 1.65; }
+
+  .score-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .score-dim { font-size: 14px; font-weight: 700; width: 16px; flex-shrink: 0; }
+  .score-track { flex: 1; height: 8px; background: var(--gray2); border-radius: 4px; }
+  .score-fill  { height: 8px; border-radius: 4px; }
+  .score-pct   { font-size: 13px; font-weight: 700; width: 38px; text-align: right; flex-shrink: 0; }
+
+  .drain-gauge {
+    background: white; border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 20px;
+    display: flex; align-items: center; gap: 20px;
+    margin-bottom: 12px;
+  }
+  .drain-circle {
+    width: 72px; height: 72px; border-radius: 50%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .drain-num { font-size: 24px; font-weight: 800; line-height: 1; }
+  .drain-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  .drain-info h4 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .drain-info p  { font-size: 13px; color: var(--text-mid); line-height: 1.6; }
+
+  .eq-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 10px; }
+  .eq-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px;
+  }
+  .eq-card .eq-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .eq-card .eq-def  { font-size: 12px; color: var(--text-mid); margin-bottom: 8px; line-height: 1.5; }
+  .eq-badge {
+    font-size: 10px; font-weight: 700; padding: 2px 9px;
+    border-radius: 20px; text-transform: uppercase; letter-spacing: .05em;
+    display: inline-block;
+  }
+  .eq-natural  { background: var(--green-lt);  color: var(--teal); }
+  .eq-stretch  { background: var(--amber-lt);  color: var(--amber); }
+  .eq-challenge{ background: var(--red-lt);    color: var(--red); }
+
+  .conflict-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .conflict-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px;
+  }
+  .conflict-card .cc-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-lt); margin-bottom: 6px; }
+  .conflict-card .cc-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .conflict-card .cc-body  { font-size: 12px; color: var(--text-mid); line-height: 1.55; }
+
+  .adapt-table { width: 100%; border-collapse: collapse; }
+  .adapt-table th { text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-lt); padding: 8px 12px; background: var(--gray1); }
+  .adapt-table td { padding: 10px 12px; border-bottom: 1px solid var(--gray2); font-size: 13px; vertical-align: top; }
+  .adapt-table tr:last-child td { border-bottom: none; }
+  .adapt-table .sname { font-weight: 700; font-size: 15px; }
+
+  .action-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+  .action-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 18px;
+  }
+  .action-card .ac-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .07em; margin-bottom: 8px;
+    padding: 3px 10px; border-radius: 20px; display: inline-block;
+  }
+  .action-card .ac-start  { background: var(--green-lt);  color: var(--teal); }
+  .action-card .ac-stop   { background: var(--red-lt);    color: var(--red); }
+  .action-card .ac-invest { background: var(--blue-pale); color: var(--blue-dark); }
+  .action-card .ac-title  { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .action-card .ac-body   { font-size: 12px; color: var(--text-mid); line-height: 1.55; }
+
+  .reliability-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; padding: 5px 14px;
+    border-radius: 20px; margin-top: 4px;
+  }
+  .rel-high { background: var(--green-lt); color: var(--teal); }
+  .rel-mod  { background: var(--amber-lt); color: var(--amber); }
+  .rel-dot  { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+  .chart-wrap { position: relative; width: 100%; height: 260px; margin: 8px 0 16px; }
+  .chart-wrap-tall { position: relative; width: 100%; height: 320px; margin: 8px 0 16px; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-lt); margin-bottom: 10px; }
+  .chart-legend span { display: flex; align-items: center; gap: 5px; }
+  .chart-legend span i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+  .quadrant-wrap { display: flex; justify-content: center; margin: 12px 0 20px; }
+
+  .print-btn-row { text-align: center; margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--gray2); }
+  .btn-print {
+    padding: 12px 32px;
+    background: var(--blue); color: white;
+    border: none; border-radius: var(--radius);
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    margin: 0 6px;
+  }
+  .btn-print:hover { background: var(--blue-dark); }
+  .btn-print.outline {
+    background: white; color: var(--blue);
+    border: 1.5px solid var(--blue);
+  }
+  .btn-print.outline:hover { background: var(--blue-pale); }
+
+  .footer-note {
+    text-align: center; font-size: 12px; color: var(--text-lt);
+    margin-top: 16px; line-height: 1.6;
+  }
+
+  @media (max-width: 540px) {
+    .ctx-grid    { grid-template-columns: repeat(2,1fr); }
+    .action-grid { grid-template-columns: 1fr; }
+    .eq-grid     { grid-template-columns: 1fr; }
+    .conflict-grid { grid-template-columns: 1fr; }
+    .fc-grid     { grid-template-columns: 1fr; }
+    .welcome-meta { grid-template-columns: repeat(3,1fr); }
+    .report-hero { flex-direction: column; text-align: center; }
+  }
+
+  @media print {
+    .nav, .btn-start, .btn-back, .btn-next, .print-btn-row { display: none !important; }
+    body { background: white; }
+    .container { padding: 0; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-logo">Trident Talents <span>DISC</span></div>
+  <div class="nav-right" id="nav-right"></div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- WELCOME SCREEN                                                     -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div id="screen-welcome" class="screen active">
+  <div class="container">
+    <div class="welcome-hero">
+      <h1>DISC Multi-Context<br>Assessment</h1>
+      <p>Discover how your behavioural style shows up across six distinct life contexts, including work, home, leadership, followership, pressure and relationships with others.</p>
+    </div>
+    <div class="welcome-meta">
+      <div class="meta-card"><div class="num">96</div><div class="lbl">Questions</div></div>
+      <div class="meta-card"><div class="num">18</div><div class="lbl">Minutes</div></div>
+      <div class="meta-card"><div class="num">13</div><div class="lbl">Report sections</div></div>
+    </div>
+    <div class="welcome-info">
+      <h3>Before you begin</h3>
+      <ul>
+        <li>Answer based on how you actually behave, not how you wish you did. There are no correct answers.</li>
+        <li>Your first instinct is almost always the most accurate. Do not overthink your responses.</li>
+        <li>All four DISC styles are equally valid. This assessment measures preferences, not ability or intelligence.</li>
+        <li>Section G asks how you behave when fully relaxed with no professional role to play. Answer honestly.</li>
+        <li>Your results and a personalised report will be generated automatically when you finish.</li>
+      </ul>
+    </div>
+    <button class="btn-start" onclick="startAssessment()">Begin Assessment</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- ASSESSMENT SCREEN                                                  -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div id="screen-assessment" class="screen">
+  <div class="container">
+    <div class="progress-wrap">
+      <div class="progress-top">
+        <span id="sec-label-top"></span>
+        <span id="q-count-top"></span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="prog-fill"></div></div>
+    </div>
+    <div id="question-block"></div>
+    <div class="nav-row">
+      <button class="btn-back" id="btn-back" onclick="navigate(-1)">Back</button>
+      <span class="q-counter" id="q-counter"></span>
+      <button class="btn-next" id="btn-next" onclick="navigate(1)">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- EMAIL GATE                                                         -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div id="screen-gate" class="screen">
+  <div class="container">
+    <div class="gate-card">
+      <div class="gate-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#185FA5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81a19.79 19.79 0 01-3.07-8.7A2 2 0 012.18 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 8.15a16 16 0 006 6l1.27-.62a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
+        </svg>
+      </div>
+      <h2>Your report is ready</h2>
+      <p>Enter your name and email to view your personalised DISC Multi-Context Report. Your results will be displayed immediately.</p>
+      <div class="field-row">
+        <label for="inp-name">Full name</label>
+        <input type="text" id="inp-name" placeholder="Your full name" autocomplete="name">
+      </div>
+      <div class="field-row">
+        <label for="inp-email">Email address</label>
+        <input type="email" id="inp-email" placeholder="your@email.com" autocomplete="email">
+      </div>
+      <div class="field-row">
+        <label for="inp-org">Organisation <span style="font-weight:400;color:var(--text-lt)">(optional)</span></label>
+        <input type="text" id="inp-org" placeholder="Company or organisation name">
+      </div>
+      <button class="btn-submit" onclick="submitGate()">View my report</button>
+      <p class="privacy-note">Your information is kept confidential and will not be shared with third parties.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- REPORT SCREEN                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div id="screen-report" class="screen">
+  <div class="container" id="report-container"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════
+// QUESTION DATA
+// ══════════════════════════════════════════════════════════════════════
+const SECTIONS = [
+  {id:"work",   label:"Section A", title:"You at work",         bg:"#E6F1FB", tc:"#0C447C", tag:"Work context",      tb:"#E6F1FB", ttc:"#0C447C"},
+  {id:"home",   label:"Section B", title:"You at home",         bg:"#EAF3DE", tc:"#27500A", tag:"Home context",      tb:"#EAF3DE", ttc:"#27500A"},
+  {id:"leader", label:"Section C", title:"You as a leader",     bg:"#FAEEDA", tc:"#633806", tag:"Leadership",        tb:"#FAEEDA", ttc:"#854F0B"},
+  {id:"follow", label:"Section D", title:"You as a follower",   bg:"#FAECE7", tc:"#712B13", tag:"Followership",      tb:"#FAECE7", ttc:"#993C1D"},
+  {id:"press",  label:"Section E", title:"You under pressure",  bg:"#FCEBEB", tc:"#791F1F", tag:"Pressure response", tb:"#FCEBEB", ttc:"#A32D2D"},
+  {id:"others", label:"Section F", title:"Working with others", bg:"#EEEDFE", tc:"#26215C", tag:"Interpersonal",     tb:"#EEEDFE", ttc:"#534AB7"},
+  {id:"nat",    label:"Section G", title:"Your natural self",   bg:"#E1F5EE", tc:"#085041", tag:"Forced choice",     tb:"#E1F5EE", ttc:"#0F6E56"},
+  {id:"rel",    label:"Section H", title:"Consistency check",   bg:"#F1EFE8", tc:"#2C2C2A", tag:"Reliability",       tb:"#F1EFE8", ttc:"#444441"},
+];
+
+const QS = [
+  // A — WORK
+  {s:"work",q:"When a new project arrives on your desk, your first instinct is to:",opts:[["Set the objective and start moving immediately","D"],["Get the team excited and brainstorm together","i"],["Clarify scope and ensure the team is aligned before proceeding","S"],["Map out requirements, risks and timelines before committing to a direction","C"]]},
+  {s:"work",q:"Your preferred approach to a significant work decision is:",opts:[["Make the call yourself and course-correct as needed","D"],["Talk it through with trusted colleagues and follow the collective energy","i"],["Build consensus so that everyone feels comfortable with the outcome","S"],["Gather sufficient data, evaluate options and decide when the evidence is clear","C"]]},
+  {s:"work",q:"When assigned a goal with no specific instructions, you typically:",opts:[["Define your own approach and execute without seeking guidance","D"],["Look for creative angles and share ideas widely with others","i"],["Confirm expectations with your manager before committing to a plan","S"],["Research best practices thoroughly before beginning any work","C"]]},
+  {s:"work",q:"The work environment that brings out your best performance is:",opts:[["Fast-paced, competitive and oriented around tangible results","D"],["Energetic, social and filled with variety and fresh challenges","i"],["Stable, cooperative and free from unnecessary conflict or disruption","S"],["Structured, precise and consistently oriented toward quality output","C"]]},
+  {s:"work",q:"When you receive critical feedback at work, your first response is to:",opts:[["Acknowledge it briefly, then shift your focus to what needs to change","D"],["Talk it through with someone, as you process better in conversation","i"],["Take it personally, even when you know objectively that you should not","S"],["Analyse the feedback carefully to understand exactly what went wrong","C"]]},
+  {s:"work",q:"In a team meeting where nobody is taking ownership, you are most likely to:",opts:[["Step forward and take charge without waiting for permission","D"],["Propose something energising and build buy-in through enthusiasm","i"],["Wait to see whether someone else steps up before saying anything","S"],["Propose a structured process for deciding who should own each element","C"]]},
+  {s:"work",q:"Your colleagues would most likely describe your communication style as:",opts:[["Direct and to the point, occasionally blunt","D"],["Warm, expressive and naturally persuasive","i"],["Thoughtful, diplomatic and consistently considerate of others","S"],["Precise, careful and anchored in evidence","C"]]},
+  {s:"work",q:"When two colleagues are in open disagreement and you need to intervene, you:",opts:[["Make a clear call and redirect everyone back to the task","D"],["Focus on rebuilding the relationship and finding shared enthusiasm","i"],["Try to smooth things over without visibly taking sides","S"],["Present the relevant facts and propose a logical resolution path","C"]]},
+  {s:"work",q:"The thing that frustrates you most in a professional environment is:",opts:[["Slow processes and people who consistently avoid making decisions","D"],["Rigid structures that extinguish creative energy and momentum","i"],["Interpersonal conflict, aggression or a persistently negative atmosphere","S"],["Careless work, factual errors and a general lack of attention to detail","C"]]},
+  {s:"work",q:"When a project deadline is moved forward by two days without warning, you:",opts:[["Reprioritise ruthlessly and push through without complaint","D"],["Rally the team with a burst of energy to make it happen together","i"],["Feel the pressure internally but absorb it without showing strain","S"],["Immediately audit what is at risk and revise the plan accordingly","C"]]},
+  {s:"work",q:"At the end of a productive working day, you feel most satisfied when:",opts:[["You closed something concrete, whether a deal, a decision or a deliverable","D"],["You generated genuine energy and left colleagues feeling motivated","i"],["Your team is stable, nobody is under undue stress and things ran smoothly","S"],["Your output was thorough, accurate and met the standard you set for yourself","C"]]},
+  {s:"work",q:"When presenting an idea to senior leadership, your natural approach is to:",opts:[["Lead with the recommended outcome and let the evidence follow","D"],["Open with a compelling story that builds excitement around the opportunity","i"],["Emphasise team alignment and explain how the idea reinforces stability","S"],["Walk through the data, methodology and evidence before stating your conclusion","C"]]},
+  // B — HOME
+  {s:"home",q:"When a disagreement arises within your family or close social circle, you tend to:",opts:[["Address it directly rather than allowing it to linger","D"],["Introduce some humour or lightness to reduce the emotional temperature","i"],["Absorb the tension and avoid escalating it under almost any circumstances","S"],["Stay calm and work toward a resolution based on logic and fairness","C"]]},
+  {s:"home",q:"When planning a family holiday or significant personal event, you typically:",opts:[["Take charge of the key decisions and make things happen efficiently","D"],["Generate multiple ideas, involve everyone and build collective excitement","i"],["Go along with whatever arrangement works best for the rest of the group","S"],["Research options thoroughly and compare alternatives before committing","C"]]},
+  {s:"home",q:"After a genuinely difficult week, the way you most effectively recharge is:",opts:[["Physical activity, personal challenge or tackling a project you have been deferring","D"],["Social time with people who energise you, in a lively and engaging setting","i"],["Quiet time at home with familiar routines, minimal demands and personal space","S"],["Solitary, focused time to think, organise or work on something requiring precision","C"]]},
+  {s:"home",q:"The people closest to you would most likely describe you at home as:",opts:[["Strong, self-reliant and protective, though sometimes difficult to read","D"],["Fun, warm and energising, reliably the most animated presence in any group","i"],["Steady, deeply loyal and consistently caring, always available to those who need you","S"],["Thoughtful, principled and consistent in your values and commitments","C"]]},
+  {s:"home",q:"When a close friend or partner is visibly distressed, your instinct is to:",opts:[["Identify the problem immediately and advise them on what to do","D"],["Talk it through with warmth and work to restore their positive energy","i"],["Listen without judgement and offer quiet, steady support for as long as needed","S"],["Help them analyse the situation clearly so they can resolve it methodically","C"]]},
+  {s:"home",q:"When you have unstructured personal time, you are most naturally drawn to:",opts:[["Starting a new challenge, sport, personal project or competitive activity","D"],["Being around people, trying new things and exploring unfamiliar experiences","i"],["Familiar, comfortable activities with people you have known and trusted for a long time","S"],["A quiet, focused pursuit such as reading, creative work or detailed organising","C"]]},
+  {s:"home",q:"The thing that creates the most stress in your personal life is:",opts:[["Feeling that circumstances are outside your control or that progress has stalled","D"],["Isolation, social rejection or disconnection from people you care about","i"],["Instability, change or sustained conflict within your close relationships","S"],["Disorder, inconsistency or work that has been done carelessly by others","C"]]},
+  {s:"home",q:"When someone close to you makes a decision you consider to be a mistake, you:",opts:[["Tell them directly and make your case clearly, without softening the message","D"],["Appeal to what excites or motivates them as a way of influencing their thinking","i"],["Voice your concern once, then respect their right to decide for themselves","S"],["Present the relevant facts and risks as clearly as possible, then step back","C"]]},
+  {s:"home",q:"You feel most comfortable in your personal life when:",opts:[["You are responsible for decisions that affect you and are free to act on them","D"],["There is social energy, laughter and people who bring genuine warmth","i"],["Things are predictable, relationships are harmonious and there is no unnecessary drama","S"],["There is a clear routine, high standards are maintained and things are done properly","C"]]},
+  {s:"home",q:"When you experience a significant personal setback, you typically:",opts:[["Pivot quickly and redirect your energy, as dwelling feels unproductive to you","D"],["Process it through conversation with others before finding a path forward","i"],["Allow yourself time to sit with it before moving forward gradually and carefully","S"],["Analyse what happened in a structured way before deciding what to do next","C"]]},
+  {s:"home",q:"When you need to have a difficult personal conversation, you:",opts:[["Initiate it directly rather than waiting, as you prefer resolution to avoidance","D"],["Choose a calm moment and lead with warmth to make the other person receptive","i"],["Delay as long as possible because you find the prospect of causing discomfort genuinely difficult","S"],["Think through exactly what you intend to say before saying a single word","C"]]},
+  // C — LEADER
+  {s:"leader",q:"When leading your team through a significant change, you:",opts:[["Set the direction clearly and expect the team to adapt to the new reality","D"],["Build genuine excitement around the vision and bring people along through energy","i"],["Communicate early, involve people in the process and manage concerns with care","S"],["Prepare a thorough implementation plan and share the evidence for why change is necessary","C"]]},
+  {s:"leader",q:"Your leadership style is most accurately described as:",opts:[["Directive, with clear expectations and consistent accountability for results","D"],["Inspiring, with a leadership approach grounded in storytelling and shared vision","i"],["Supportive, with a focus on developing people and preserving team stability","S"],["Analytical, with high standards and a systematic approach to quality","C"]]},
+  {s:"leader",q:"When a team member is consistently underperforming, your first response is to:",opts:[["Have a direct and immediate conversation about what needs to change","D"],["Reconnect them to the broader purpose and try to reignite their motivation","i"],["Check in privately to find out whether something personal is affecting their output","S"],["Review their working process systematically to identify precisely where it is breaking down","C"]]},
+  {s:"leader",q:"As a leader, you delegate most effectively when:",opts:[["You are confident the person has the capability to deliver the required result","D"],["You trust the person and genuinely believe in their potential to grow","i"],["You have built sufficient relationship that they will come to you if they are stuck","S"],["The task is clearly defined and you have established explicit quality benchmarks","C"]]},
+  {s:"leader",q:"In a senior leadership meeting, you are most likely to be the person who:",opts:[["Challenges assumptions directly and pushes for a decision when discussion stalls","D"],["Generates energy, introduces bold ideas and re-engages the group when momentum fades","i"],["Ensures that quieter voices are heard and that the group remains cohesive","S"],["Prepares the most thoroughly and asks the sharpest analytical questions","C"]]},
+  {s:"leader",q:"The leadership quality your team would most recognise and appreciate in you is:",opts:[["Clarity of direction, decisiveness and the ability to cut through complexity","D"],["A genuine enthusiasm for the work and the ability to make people feel it matters","i"],["Consistency, personal care and the sense that you can always be trusted","S"],["Precision, fairness and an uncompromising commitment to high standards","C"]]},
+  {s:"leader",q:"When your team misses a target, your instinct is to:",opts:[["Identify what failed and set a higher bar going forward","D"],["Regroup the team emotionally and restore their energy and belief","i"],["Check in individually to understand how each person is feeling about what happened","S"],["Conduct a structured debrief to identify root causes before drawing any conclusions","C"]]},
+  {s:"leader",q:"Your preferred approach to recognising your team's performance is:",opts:[["Results-based recognition where achievement is acknowledged and consistent effort is expected","D"],["Public, enthusiastic and celebratory in a way that energises the whole group","i"],["Personal, private and genuinely tailored to what each individual finds meaningful","S"],["Specific, merit-based feedback tied directly to the quality and accuracy of the work","C"]]},
+  {s:"leader",q:"When conflict surfaces within your team, your approach is to:",opts:[["Address it directly and move to resolution as quickly as possible","D"],["Facilitate an open conversation that restores trust and positive energy","i"],["Mediate quietly behind the scenes to restore harmony without anyone losing face","S"],["Work through the factual basis of the disagreement to find the most rational resolution","C"]]},
+  {s:"leader",q:"Your most natural and authentic leadership strength is:",opts:[["Delivering results consistently, particularly under difficult or ambiguous conditions","D"],["Inspiring and uniting people around a shared goal in a way that generates genuine commitment","i"],["Creating the psychological safety and team cohesion that allows people to do their best work","S"],["Building systems, standards and precision that ensure excellence in execution","C"]]},
+  {s:"leader",q:"When developing people on your team, you prioritise:",opts:[["Stretching them with harder challenges and raising expectations incrementally","D"],["Exposing them to new experiences that broaden their perspective and build confidence","i"],["Providing consistent mentorship, emotional safety and encouragement over time","S"],["Giving detailed guidance, structured feedback loops and clear performance metrics","C"]]},
+  {s:"leader",q:"The leader you are genuinely working to become is one who:",opts:[["Drives the business forward and delivers results that others are unable to achieve","D"],["Builds a culture of genuine engagement where people feel proud of their work","i"],["Creates an environment of deep trust, stability and authentic care for every person","S"],["Sets the highest standards and ensures that excellence in execution is non-negotiable","C"]]},
+  // D — FOLLOWER
+  {s:"follow",q:"When given a directive by leadership that you disagree with, you:",opts:[["Push back clearly, state your case and then commit once the decision is made","D"],["Reframe it positively to maintain the team's energy and morale","i"],["Accept it, even with reservations, because you trust the process and those above you","S"],["Ask clarifying questions until you fully understand the rationale before moving forward","C"]]},
+  {s:"follow",q:"The type of manager under whom you perform at your best is one who:",opts:[["Sets a clear goal and then gets out of your way to let you execute","D"],["Brings enthusiasm and collaborative energy to the work on a daily basis","i"],["Is caring, consistent and creates an environment where you feel genuinely safe","S"],["Is structured, precise and provides detailed, quality-focused feedback","C"]]},
+  {s:"follow",q:"When you are part of a team but not the designated leader, you typically:",opts:[["Assume an informal leadership role naturally, often without consciously intending to","D"],["Become the team's energy engine, maintaining morale and sustaining momentum","i"],["Focus on supporting others and ensuring that nobody in the group is left behind","S"],["Concentrate on quality, accuracy and ensuring the plan is sound before execution begins","C"]]},
+  {s:"follow",q:"When your manager provides you with meaningful positive feedback, you:",opts:[["Appreciate it briefly and move forward, as you do not tend to dwell on praise","D"],["Feel genuinely energised and want to share the recognition with the broader team","i"],["Feel deeply seen and valued, because recognition matters profoundly to you","S"],["Want to understand specifically what was effective so that you can replicate it deliberately","C"]]},
+  {s:"follow",q:"When your manager invites your opinion on a decision that has already been made, you:",opts:[["Give your honest view regardless of whether it contradicts theirs","D"],["Share your perspective enthusiastically and express genuine hope it will be considered","i"],["Express measured agreement because you do not want to introduce friction unnecessarily","S"],["Raise any logical concerns diplomatically and supported by evidence","C"]]},
+  {s:"follow",q:"Your response to being micromanaged is:",opts:[["Immediate and open resistance, as it frustrates you more than almost anything else","D"],["Deflation and disengagement, because it kills your creative energy","i"],["Quiet tolerance, even when it does not feel good or serve your development","S"],["Acceptance, provided the feedback is precise, relevant and constructively delivered","C"]]},
+  {s:"follow",q:"The thing that builds your loyalty to an organisation or team most reliably is:",opts:[["Genuine autonomy to operate at a high level and make decisions that matter","D"],["A culture that is positive, energising and genuinely social in character","i"],["Relationships grounded in mutual trust, real respect and consistent care","S"],["An environment that values quality, consistency and serious professional standards","C"]]},
+  {s:"follow",q:"When your team receives an unclear or poorly defined task, you:",opts:[["Define it yourself and begin moving before others have finished deliberating","D"],["Turn the ambiguity into an energising open-ended creative challenge","i"],["Wait for clarification from the appropriate person before committing to any direction","S"],["Build a structured framework for the task before initiating any work","C"]]},
+  {s:"follow",q:"In a team you are not leading, the role you naturally fill is:",opts:[["The driver, setting the pace and holding people accountable for their commitments","D"],["The connector, sustaining positive energy and keeping relationships constructive","i"],["The stabiliser, absorbing tension and keeping the team grounded when pressure rises","S"],["The quality keeper, ensuring that nothing important is missed or done carelessly","C"]]},
+  {s:"follow",q:"When something goes wrong on a team project you are contributing to, you:",opts:[["Step in immediately and take control of fixing it without waiting to be asked","D"],["Rally the team emotionally and reframe the situation in a constructive light","i"],["Support whoever is most affected and contribute quietly in the background","S"],["Identify the root cause methodically before proposing any corrective action","C"]]},
+  {s:"follow",q:"Your general relationship with authority figures at work is:",opts:[["Respectful but equal, as you tend to treat people with authority as professional peers","D"],["Warm and personal, because you genuinely enjoy building a human connection with leaders","i"],["Deferential and loyal, because you trust the judgement of those with more experience","S"],["Professional and task-focused, with a preference for structured interactions","C"]]},
+  {s:"follow",q:"The factor that would most likely cause you to leave a job is:",opts:[["Insufficient autonomy and no meaningful opportunity to make a visible impact","D"],["A culture that is joyless, politically charged and unsupportive of people","i"],["Persistent conflict or the sustained sense that you do not belong in the environment","S"],["Being expected to produce work that falls consistently below a standard you find acceptable","C"]]},
+  // E — PRESSURE
+  {s:"press",q:"When a crisis hits at work, your immediate response is to:",opts:[["Assume control, assess the situation and direct action without hesitation","D"],["Maintain positive team energy and keep everyone focused on what can be done","i"],["Stay composed and ensure that nobody around you begins to panic","S"],["Identify the root cause systematically before taking any corrective action","C"]]},
+  {s:"press",q:"Under significant stress, the behaviour others are most likely to observe in you is:",opts:[["Increased aggression, visible impatience and shorter tolerance for obstacles","D"],["Over-reactivity, scattered energy and a tendency to talk more than is helpful","i"],["Withdrawal, silence or an excessive willingness to accommodate others at your own expense","S"],["Paralysis, hyper-critical analysis or inability to move until conditions feel certain","C"]]},
+  {s:"press",q:"When you are overwhelmed by competing demands simultaneously, you:",opts:[["Cut ruthlessly what does not serve the most critical priority and execute without distraction","D"],["Try to manage multiple fronts and draw on the support of people around you","i"],["Push through without burdening others, even when you are genuinely struggling","S"],["Build a structured priority list and work through it in a disciplined sequential manner","C"]]},
+  {s:"press",q:"When someone criticises you publicly, your instinct is to:",opts:[["Defend your position immediately and firmly, without hesitation","D"],["Use humour or social skill to redirect the tension and avoid open confrontation","i"],["Feel hurt but remain visibly composed, processing it internally","S"],["Wait until a private moment, then address it calmly with logic and supporting facts","C"]]},
+  {s:"press",q:"The fear that surfaces most reliably when you are under significant pressure is:",opts:[["Losing control of the situation or being perceived as weak or incapable","D"],["Being rejected, excluded or losing your influence over people and outcomes","i"],["Letting people down or causing lasting damage to team harmony and relationships","S"],["Making a critical error or being exposed as inadequate in front of others","C"]]},
+  {s:"press",q:"When a plan you are personally responsible for begins to fail, you:",opts:[["Own it completely, pivot fast and take full accountability without making excuses","D"],["Look for a creative alternative quickly and work to rebuild momentum and belief","i"],["Feel deeply responsible for the team's experience and try quietly to shield others from the impact","S"],["Analyse what went wrong in a structured way before taking any corrective action","C"]]},
+  {s:"press",q:"When you are in back-to-back high-stakes situations over several consecutive days, you:",opts:[["Thrive, because sustained pressure sharpens rather than depletes your focus","D"],["Burn brightly initially, but eventually require significant social energy to restore yourself","i"],["Begin to feel the strain noticeably, because you need routine and calm to function well","S"],["Find yourself cutting corners on analysis because there is insufficient time to think properly","C"]]},
+  {s:"press",q:"When a colleague's failure directly affects your work without warning, you:",opts:[["Address it with them directly and immediately, as delay serves no useful purpose","D"],["Resolve it conversationally with genuine warmth, avoiding the creation of bad feeling","i"],["Absorb the impact yourself rather than risking friction by raising it","S"],["Document the impact carefully and address it with evidence at an appropriate moment","C"]]},
+  {s:"press",q:"Under pressure, your relationship with time becomes:",opts:[["Hyper-focused and intolerant of anything that wastes it without contributing to the outcome","D"],["Reactive and scattered, as you tend to jump between competing priorities","i"],["Slower and more careful, as you need more processing time than usual to function well","S"],["More rigidly structured, as you rely on process and sequence to maintain control","C"]]},
+  {s:"press",q:"What best describes your recovery after a sustained period of high pressure?",opts:[["Short and efficient, as you move on quickly and do not tend to dwell on what has passed","D"],["Social and energised, as you need the company and positivity of others to fully reset","i"],["Gradual and quiet, as you need extended time and familiar routine before feeling restored","S"],["Reflective and structured, as you need to debrief what happened before you can genuinely close it","C"]]},
+  {s:"press",q:"When the organisation you work for is navigating significant uncertainty, you:",opts:[["Take charge of your own direction regardless of what is being decided above you","D"],["Focus your energy on keeping the team's morale and collective spirit strong","i"],["Look for reassurance from leaders and seek visible signs of stability in the environment","S"],["Gather as much reliable information as possible before drawing any personal conclusions","C"]]},
+  {s:"press",q:"The statement that most honestly describes your pressure response is:",opts:[["I deliver results consistently, though I sometimes move over people in the process","D"],["I inspire those around me, though I can lose personal focus when emotions run high","i"],["I remain calm for others, though I frequently sacrifice my own needs to protect the team","S"],["I produce quality work under pressure, though I sometimes overthink when speed is needed","C"]]},
+  // F — OTHERS
+  {s:"others",q:"When you meet someone new in a professional context for the first time, you:",opts:[["Move to substance quickly and form an assessment of their competence efficiently","D"],["Come across as warm, immediately personable and genuinely interested in them","i"],["Take your time to build rapport and do not rush the process of forming a connection","S"],["Ask precise, thoughtful questions that help you understand who they are and how they think","C"]]},
+  {s:"others",q:"When working alongside someone whose style is fundamentally different from yours, you:",opts:[["Expect them to adapt to your approach rather than significantly adjusting your own","D"],["Find a way to make the collaboration enjoyable and productive regardless of the difference","i"],["Work deliberately to understand their style and invest in meeting them where they are","S"],["Prefer to establish clear roles and shared processes so that style differences do not create friction","C"]]},
+  {s:"others",q:"The type of person you find genuinely difficult to work with is:",opts:[["Someone who is slow, consistently indecisive and always needs more time before committing","D"],["Someone who is rigid, humourless and reliably extinguishes creative momentum","i"],["Someone who is aggressive, confrontational or unpredictably volatile in their behaviour","S"],["Someone who is careless, imprecise and consistently cuts corners on quality","C"]]},
+  {s:"others",q:"When you are in conflict with a colleague, your default approach is to:",opts:[["Address it directly and without softening, preferring resolution to prolonged discomfort","D"],["Use warmth and social intelligence to find a resolution without lasting damage to the relationship","i"],["Avoid it for as long as is tenable, then agree to a position that restores harmony","S"],["Build a logical case for your position and request a structured conversation","C"]]},
+  {s:"others",q:"When someone in a group setting disagrees with your position, you:",opts:[["Hold your ground unless they present an argument that is genuinely superior to your own","D"],["Look for shared enthusiasm rather than pressing a disagreement that costs energy","i"],["Seek a middle ground that everyone in the group can accept without significant objection","S"],["Examine both positions with evidence before drawing any conclusion or changing your view","C"]]},
+  {s:"others",q:"You build trust with other people primarily by:",opts:[["Demonstrating results over time and showing people that you consistently deliver","D"],["Being positive, open and genuinely interested in who they are as people","i"],["Showing up reliably for people over an extended period, particularly when it is inconvenient","S"],["Demonstrating expertise, thoroughness and personal integrity in everything you produce","C"]]},
+  {s:"others",q:"When a team you are part of lacks clear direction, you typically:",opts:[["Step in and provide it without waiting to be asked, because someone needs to","D"],["Energise the group and generate ideas until sufficient momentum builds naturally","i"],["Support whoever eventually steps forward and help them execute effectively","S"],["Propose a structured framework that gives the team a clear basis for moving forward","C"]]},
+  {s:"others",q:"When a colleague shares an idea that is clearly still underdeveloped, you:",opts:[["Evaluate its merit quickly and share your honest assessment without significant delay","D"],["Build on it enthusiastically and help shape it into something more fully formed","i"],["Encourage them visibly and create the space for the idea to develop at its own pace","S"],["Ask probing questions to stress-test the thinking before offering any reaction","C"]]},
+  {s:"others",q:"Your natural and most recognisable role within a high-performing team is:",opts:[["The driver, pushing the team toward the goal with consistent energy and accountability","D"],["The energiser, sustaining the team's creative spirit and collective motivation","i"],["The glue, holding relationships and team cohesion together under any conditions","S"],["The standard-setter, ensuring that quality and precision are maintained throughout","C"]]},
+  {s:"others",q:"When someone on your team is visibly struggling, you are most likely to:",opts:[["Tell them directly and clearly what they need to do differently to improve their situation","D"],["Check in with warmth, sustain their engagement and keep their spirits up","i"],["Take on some of their load quietly and offer steady, private support","S"],["Sit with them and work through the problem systematically until a clear path emerges","C"]]},
+  {s:"others",q:"After a productive and successful team collaboration, what you value most is:",opts:[["That the team hit the target and delivered a result that justified the effort invested","D"],["That the work generated genuine energy and every person contributed their best","i"],["That the team emerged from the experience closer, more cohesive and mutually trusting","S"],["That the final output was thorough, accurate and reflected the standard you collectively set","C"]]},
+  {s:"others",q:"If you could honestly change one thing about how you work with other people, it would be:",opts:[["Being more patient when others do not operate at the same pace or intensity as I do","D"],["Following through more consistently and reliably on the commitments I make to people","i"],["Speaking up more directly when I disagree or feel uncomfortable with a direction","S"],["Being more flexible and less attached to a standard of perfection that others cannot always match","C"]]},
+  // G — NATURAL (forced choice)
+  {s:"nat",fc:true,q:"Which of these describes you more accurately when you are fully relaxed and not performing for anyone?",a:["I take charge of situations naturally, even in personal settings","D"],b:["I bring energy and warmth that draws people toward me","i"]},
+  {s:"nat",fc:true,q:"When you have no obligations and complete freedom to spend time exactly as you wish, you are more likely to:",a:["Pursue a personal challenge or work on something you want to build or improve","D"],b:["Connect with people whose company genuinely restores and energises you","i"]},
+  {s:"nat",fc:true,q:"When nobody is watching and there are no consequences, your natural default is to:",a:["Move fast, decide quickly and get things done without deliberation","D"],b:["Slow down, take your time and do things with care and precision","C"]},
+  {s:"nat",fc:true,q:"In a completely unstructured social situation with no clear role or agenda, you are more naturally:",a:["Someone who brings energy and takes a visible, active part in what is happening","i"],b:["Someone who observes, listens and contributes selectively when it feels right","S"]},
+  {s:"nat",fc:true,q:"When you receive criticism in a personal context from someone you trust deeply, your instinctive response is more often to:",a:["Defend your position or push back, even briefly, before reflecting","D"],b:["Internalise it quietly and spend time processing whether it is valid","C"]},
+  {s:"nat",fc:true,q:"Your deepest, most private source of personal satisfaction comes more from:",a:["Achieving something difficult that others said could not be done","D"],b:["Knowing that you have shown up consistently for the people who depend on you","S"]},
+  {s:"nat",fc:true,q:"When you are completely off-duty and nobody needs anything from you, you are more naturally:",a:["Restless and looking for something useful, productive or stimulating to do","D"],b:["Content to simply be still, without any particular agenda or output","S"]},
+  {s:"nat",fc:true,q:"Your natural internal voice when facing a genuinely difficult personal decision is more likely to say:",a:["Just decide. You can figure out the details as you go.","D"],b:["Think this through properly before you commit to anything.","C"]},
+  {s:"nat",fc:true,q:"In a group of people you have just met with no shared purpose, you are more naturally:",a:["Someone who introduces yourself readily and initiates conversation with confidence","i"],b:["Someone who waits to be spoken to and takes time before opening up","S"]},
+  {s:"nat",fc:true,q:"When something in your personal life goes wrong, your most natural first instinct is to:",a:["Fix it immediately and move forward without extended dwelling","D"],b:["Talk to someone you trust before deciding what to do next","i"]},
+  {s:"nat",fc:true,q:"The version of yourself that feels most authentic and effortless is:",a:["Confident, direct and fully in control of your own direction","D"],b:["Precise, careful and absolutely certain that what you produce is right","C"]},
+  {s:"nat",fc:true,q:"When you strip away every professional role and expectation, your most honest natural tendency is to:",a:["Lead, initiate and shape what happens around you","D"],b:["Support, stabilise and care for the people you feel responsible for","S"]},
+  // H — RELIABILITY
+  {s:"rel",rel:true,q:"When facing an important decision at work with time pressure, you are more likely to:",opts:[["Act decisively on the best available information rather than waiting","D"],["Involve others in the decision to build collective energy and support","i"],["Seek agreement from the group before committing to any direction","S"],["Gather more data before committing, even if it creates a brief delay","C"]]},
+  {s:"rel",rel:true,q:"In a team setting without a clear leader, your most natural contribution is:",opts:[["To take charge of the direction and set the pace for everyone else","D"],["To energise the group and keep morale and momentum high","i"],["To support whoever steps up and ensure the team stays cohesive","S"],["To build a structured framework that gives the team clarity on process","C"]]},
+  {s:"rel",rel:true,q:"The working environment in which you feel most genuinely alive and engaged is:",opts:[["High-stakes, fast-paced and clearly oriented around achieving measurable results","D"],["Social, creative and filled with variety, energy and new opportunities","i"],["Stable, cooperative and reliably free from conflict or unnecessary disruption","S"],["Structured, quality-focused and committed to doing things properly and precisely","C"]]},
+  {s:"rel",rel:true,q:"When a colleague challenges your idea in front of others, you:",opts:[["Hold your position and make your case confidently without backing down","D"],["Use charm and energy to navigate the moment without creating tension","i"],["Concede more readily than you probably should, to preserve the atmosphere","S"],["Respond with evidence and reasoning in a calm and measured tone","C"]]},
+  {s:"rel",rel:true,q:"Your most immediate source of workplace satisfaction is:",opts:[["Achieving a goal, closing a deal or delivering a result under difficult conditions","D"],["Connecting meaningfully with people and leaving them more energised than you found them","i"],["Knowing that your team is functioning well, stable and genuinely happy in their work","S"],["Producing something that is accurate, thorough and meets a standard you are proud of","C"]]},
+  {s:"rel",rel:true,q:"When you are asked to lead something important with minimal guidance or support, you:",opts:[["Embrace it fully, define your own approach and execute with confidence","D"],["Get excited about the possibilities and begin building enthusiasm with others","i"],["Feel some anxiety but proceed carefully, checking in with others as you go","S"],["Want clarity on expectations and outcomes before committing to a specific approach","C"]]},
+  {s:"rel",rel:true,q:"The quality that you consider your single greatest professional strength is:",opts:[["Your capacity to make decisions decisively and drive outcomes under pressure","D"],["Your ability to energise, persuade and inspire people around a compelling idea","i"],["Your consistency, reliability and the loyalty you generate in those around you","S"],["Your precision, analytical rigour and commitment to quality in everything you produce","C"]]},
+  {s:"rel",rel:true,q:"When change is introduced into your working environment unexpectedly, you:",opts:[["Adapt quickly and redirect your energy toward the new reality without hesitation","D"],["Find the opportunity within the change and help others see it with enthusiasm","i"],["Need time to process it and feel some anxiety until the new normal becomes clear","S"],["Want a thorough explanation of the rationale before accepting or committing to it","C"]]},
+  {s:"rel",rel:true,q:"The type of feedback that you find most useful and genuinely motivating is:",opts:[["Direct, immediate and focused on the result rather than the method","D"],["Delivered with warmth, encouragement and clear acknowledgement of your effort","i"],["Given privately, gently and with obvious care for your wellbeing and feelings","S"],["Specific, evidence-based and tied to concrete and measurable standards","C"]]},
+  {s:"rel",rel:true,q:"When you are under genuine stress, the people around you are most likely to notice:",opts:[["That you become more assertive, more urgent and less tolerant of obstacles","D"],["That you become more expressive, more reactive and less focused than usual","i"],["That you become quieter, more withdrawn and less likely to ask for what you need","S"],["That you become more critical, more cautious and more reluctant to move without certainty","C"]]},
+  {s:"rel",rel:true,q:"Your instinctive approach to managing your time and workload is:",opts:[["Prioritise aggressively and focus exclusively on what drives the most important outcomes","D"],["Work in bursts of high energy, rely on momentum and adapt as things evolve","i"],["Maintain a consistent and predictable routine and avoid overloading your capacity","S"],["Plan methodically, allow sufficient time for quality review and follow through sequentially","C"]]},
+  {s:"rel",rel:true,q:"The statement that most accurately captures what drives you at your core is:",opts:[["I need to achieve meaningful results and maintain real control over what I build","D"],["I need to connect with people, be genuinely liked and create energy wherever I go","i"],["I need to be trusted, to belong and to know that the people I care about are safe","S"],["I need to do things properly, meet high standards and know that my work is genuinely correct","C"]]},
+];
+
+// ══════════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════════
+let current = 0;
+let answers = new Array(QS.length).fill(null);
+let RESULTS = null;
+let USER_NAME = '';
+
+// ══════════════════════════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════════════════════════
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + id).classList.add('active');
+}
+
+function startAssessment() {
+  show('assessment');
+  renderQuestion();
+}
+
+function navigate(dir) {
+  if (dir === 1 && current === QS.length - 1) {
+    show('gate');
+    return;
+  }
+  current = Math.max(0, Math.min(QS.length - 1, current + dir));
+  renderQuestion();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// RENDER QUESTION
+// ══════════════════════════════════════════════════════════════════════
+function renderQuestion() {
+  const q = QS[current];
+  const sec = SECTIONS.find(s => s.id === q.s);
+  const pct = (current / QS.length) * 100;
+
+  document.getElementById('prog-fill').style.width = pct + '%';
+  document.getElementById('sec-label-top').textContent = sec.label + ': ' + sec.title;
+  document.getElementById('q-count-top').textContent = (current + 1) + ' of ' + QS.length;
+  document.getElementById('q-counter').textContent = (current + 1) + ' / ' + QS.length;
+  document.getElementById('btn-back').disabled = current === 0;
+  const isLast = current === QS.length - 1;
+  const nx = document.getElementById('btn-next');
+  nx.textContent = isLast ? 'See my results' : 'Next';
+  nx.disabled = answers[current] === null;
+
+  let html = `<div class="sec-banner" style="background:${sec.bg};">
+    <div class="sec-label" style="color:${sec.tc};">${sec.label} — ${sec.title}</div>
+  </div>`;
+
+  if (q.rel) {
+    html += `<span class="context-tag" style="background:#F1EFE8;color:#444441;">Consistency check</span>`;
+  } else {
+    html += `<span class="context-tag" style="background:${sec.tb};color:${sec.ttc};">${sec.tag}</span>`;
+  }
+
+  html += `<div class="q-num">Question ${current + 1}</div>`;
+  html += `<div class="q-text">${q.q}</div>`;
+
+  if (q.fc) {
+    html += `<div class="q-hint">Select the option that feels more naturally true when you are not at work and have no role to play.</div>`;
+    html += `<div class="fc-grid">`;
+    html += `<div class="fc-opt${answers[current]==='a'?' selected':''}" onclick="pickFC('a')">${q.a[0]}</div>`;
+    html += `<div class="fc-opt${answers[current]==='b'?' selected':''}" onclick="pickFC('b')">${q.b[0]}</div>`;
+    html += `</div>`;
+  } else {
+    const L = ['A','B','C','D'];
+    q.opts.forEach((opt, i) => {
+      const sel = answers[current] === i ? ' selected' : '';
+      html += `<div class="option${sel}" onclick="pick(${i})">
+        <span class="opt-letter">${L[i]}</span>
+        <span class="opt-text">${opt[0]}</span>
+      </div>`;
+    });
+  }
+
+  document.getElementById('question-block').innerHTML = html;
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+function pick(i) {
+  answers[current] = i;
+  document.getElementById('btn-next').disabled = false;
+  renderQuestion();
+}
+function pickFC(v) {
+  answers[current] = v;
+  document.getElementById('btn-next').disabled = false;
+  renderQuestion();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// SCORING
+// ══════════════════════════════════════════════════════════════════════
+function scoreGroup(sectionIds) {
+  const sc = {D:0, i:0, S:0, C:0};
+  QS.forEach((q, qi) => {
+    if (!sectionIds.includes(q.s) || answers[qi] === null) return;
+    let dim;
+    if (q.fc) {
+      dim = answers[qi] === 'a' ? q.a[1] : q.b[1];
+    } else {
+      dim = q.opts[answers[qi]][1];
+    }
+    sc[dim]++;
+  });
+  const t = Object.values(sc).reduce((a,b) => a+b, 0) || 1;
+  const pct = {};
+  Object.keys(sc).forEach(k => pct[k] = Math.round(sc[k]/t*100));
+  const sorted = Object.entries(sc).sort((a,b) => b[1]-a[1]);
+  const pri = sorted[0][0], sec2 = sorted[1][0];
+  const diff = sorted[0][1] - sorted[1][1];
+  const intensity = diff >= 5 ? 'Strong' : diff >= 3 ? 'Moderate' : 'Mild';
+  const style = diff <= 2 ? pri + sec2 : pri;
+  return { scores: sc, pct, primary: pri, secondary: sec2, intensity, style };
+}
+
+function calcEnergyDrain(adapted, natural) {
+  const dims = ['D','i','S','C'];
+  const total = dims.reduce((s, d) => s + Math.abs((adapted.pct[d]||0) - (natural.pct[d]||0)), 0);
+  return Math.round(total / 4);
+}
+
+function calcReliability(adapted) {
+  const rel = scoreGroup(['rel']);
+  const dims = ['D','i','S','C'];
+  let matches = 0;
+  dims.forEach(d => {
+    if (Math.abs((rel.pct[d]||0) - (adapted.pct[d]||0)) <= 20) matches++;
+  });
+  return matches >= 3 ? 'High' : 'Moderate';
+}
+
+function computeAll() {
+  const adapted   = scoreGroup(['work','home','leader','follow','press','others']);
+  const natural   = scoreGroup(['nat']);
+  const energyDrain = calcEnergyDrain(adapted, natural);
+  const reliability = calcReliability(adapted);
+  const contexts  = {
+    work:     scoreGroup(['work']),
+    home:     scoreGroup(['home']),
+    leader:   scoreGroup(['leader']),
+    follower: scoreGroup(['follow']),
+    pressure: scoreGroup(['press']),
+    others:   scoreGroup(['others']),
+  };
+  return { adapted, natural, energyDrain, reliability, contexts };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// EMAIL GATE
+// ══════════════════════════════════════════════════════════════════════
+function submitGate() {
+  const name  = document.getElementById('inp-name').value.trim();
+  const email = document.getElementById('inp-email').value.trim();
+  const org   = document.getElementById('inp-org').value.trim();
+
+  if (!name) { alert('Please enter your name.'); return; }
+  if (!email || !email.includes('@')) { alert('Please enter a valid email address.'); return; }
+
+  USER_NAME = name;
+  RESULTS = computeAll();
+  RESULTS.name = name;
+  RESULTS.email = email;
+  RESULTS.org = org;
+
+  // ── EmailJS (optional — configure with your own IDs) ──────────────
+  // To activate: replace YOUR_SERVICE_ID, YOUR_TEMPLATE_ID, YOUR_PUBLIC_KEY
+  // with values from https://www.emailjs.com (free account)
+  // Then uncomment the block below.
+  /*
+  if (typeof emailjs !== 'undefined') {
+    emailjs.send('YOUR_SERVICE_ID', 'YOUR_TEMPLATE_ID', {
+      respondent_name:  name,
+      respondent_email: email,
+      respondent_org:   org || 'Not provided',
+      primary_style:    RESULTS.adapted.style,
+      work_style:       RESULTS.contexts.work.style,
+      home_style:       RESULTS.contexts.home.style,
+      leader_style:     RESULTS.contexts.leader.style,
+      follower_style:   RESULTS.contexts.follower.style,
+      energy_drain:     RESULTS.energyDrain,
+      reliability:      RESULTS.reliability,
+      date_completed:   new Date().toLocaleDateString('en-GB', {day:'2-digit',month:'long',year:'numeric'}),
+    }, 'YOUR_PUBLIC_KEY').catch(e => console.warn('EmailJS error:', e));
+  }
+  */
+
+  show('report');
+  buildReport(RESULTS);
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// REPORT BUILDER
+// ══════════════════════════════════════════════════════════════════════
+const DIM_COLORS = { D: '#185FA5', i: '#D85A30', S: '#1D9E75', C: '#BA7517' };
+const STYLE_LABELS = {
+  D:'Dominance', i:'Influence', S:'Steadiness', C:'Conscientiousness',
+  Di:'Dominance-Influence', DC:'Dominance-Conscientiousness',
+  iD:'Influence-Dominance', iS:'Influence-Steadiness',
+  Si:'Steadiness-Influence', SC:'Steadiness-Conscientiousness',
+  CS:'Conscientiousness-Steadiness', CD:'Conscientiousness-Dominance',
+};
+
+const EQ_MINDSETS = [
+  { name:'Self-Assured',  def:'Asserting your opinions, projecting confidence and taking charge of situations.',        disc:'D',  align:'natural'  },
+  { name:'Dynamic',       def:'Initiating action on your ideas, influencing people and projecting a strong social presence.',  disc:'Di', align:'natural'  },
+  { name:'Outgoing',      def:'Establishing and maintaining relationships and expressing your emotions openly to others.',     disc:'i',  align:'natural'  },
+  { name:'Empathizing',   def:'Reaching out with compassion, seeking to understand emotional needs and being supportive.',     disc:'iS', align:'stretch'  },
+  { name:'Receptive',     def:'Staying open to others\' ideas and being willing to compromise or set aside your own preferences.',disc:'S', align:'stretch'  },
+  { name:'Composed',      def:'Reflecting before acting, moderating your responses even under stress, and exercising diplomacy.',disc:'SC',align:'challenge' },
+  { name:'Objective',     def:'Separating facts from emotions and keeping discussions focused on logic and evidence.',         disc:'C',  align:'challenge' },
+  { name:'Resolute',      def:'Standing your ground in the face of opposition, speaking up about problems and pushing through resistance.',disc:'CD',align:'stretch'},
+];
+
+function getMindsetAlignment(primary, secondary) {
+  const naturalDims = [primary, secondary];
+  return EQ_MINDSETS.map(m => {
+    const mDims = m.disc.split('').filter(c => 'DiSC'.includes(c));
+    const overlap = mDims.filter(d => naturalDims.includes(d)).length;
+    if (overlap >= 1) return { ...m, alignment: 'natural' };
+    const opposite = { D:'S', S:'D', i:'C', C:'i' };
+    if (mDims.some(d => opposite[primary] === d)) return { ...m, alignment: 'challenge' };
+    return { ...m, alignment: 'stretch' };
+  });
+}
+
+function scoreBar(pct, color) {
+  return `<div class="score-track"><div class="score-fill" style="width:${pct}%;background:${color};"></div></div>`;
+}
+
+function buildReport(R) {
+  const { adapted, natural, energyDrain, reliability, contexts } = R;
+  const name = R.name || 'You';
+  const firstName = name.split(' ')[0];
+  const drain = energyDrain;
+  const drainLevel = drain >= 25 ? 'High' : drain >= 15 ? 'Moderate' : 'Low';
+  const drainColor = drain >= 25 ? '#A32D2D' : drain >= 15 ? '#BA7517' : '#1D9E75';
+  const drainBg    = drain >= 25 ? '#FCEBEB' : drain >= 15 ? '#FAEEDA' : '#EAF3DE';
+
+  const quadDots = [
+    { label:'Work',     profile:contexts.work,     color:'#185FA5' },
+    { label:'Home',     profile:contexts.home,     color:'#BA7517' },
+    { label:'Leader',   profile:contexts.leader,   color:'#0C447C' },
+    { label:'Follower', profile:contexts.follower, color:'#D85A30' },
+    { label:'Pressure', profile:contexts.pressure, color:'#A32D2D' },
+    { label:'Others',   profile:contexts.others,   color:'#534AB7' },
+    { label:'Natural',  profile:natural,           color:'#1D9E75' },
+  ];
+  function dotXY(p) {
+    const t = (p.pct.D||0)+(p.pct.i||0)+(p.pct.S||0)+(p.pct.C||0) || 1;
+    let x = ((p.pct.i||0)-(p.pct.C||0))/t, y = ((p.pct.D||0)-(p.pct.S||0))/t;
+    const mag = Math.sqrt(x*x+y*y);
+    if (mag > 0) { const sc = Math.min(mag*1.8, 0.88); x = x/mag*sc; y = y/mag*sc; }
+    return { x: 190+x*170, y: 190-y*170 };
+  }
+  const computedDots = quadDots.map(d => {
+    const {x, y} = dotXY(d.profile);
+    return '<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="9" fill="'+d.color+'" stroke="white" stroke-width="2"/>'
+      + '<text x="'+(x+13).toFixed(1)+'" y="'+(y+4).toFixed(1)+'" font-size="10" font-weight="600" fill="'+d.color+'">'+d.label+'</text>';
+  }).join('');
+
+  const mindsets = getMindsetAlignment(adapted.primary, adapted.secondary);
+
+  const quadDots = [
+    { label:'Work',     profile:contexts.work,     color:'#185FA5' },
+    { label:'Home',     profile:contexts.home,     color:'#BA7517' },
+    { label:'Leader',   profile:contexts.leader,   color:'#0C447C' },
+    { label:'Follower', profile:contexts.follower, color:'#D85A30' },
+    { label:'Pressure', profile:contexts.pressure, color:'#A32D2D' },
+    { label:'Others',   profile:contexts.others,   color:'#534AB7' },
+    { label:'Natural',  profile:natural,           color:'#1D9E75' },
+  ];
+
+  function dotXY(p) {
+    const t = (p.pct.D||0)+(p.pct.i||0)+(p.pct.S||0)+(p.pct.C||0) || 1;
+    let x = ((p.pct.i||0) - (p.pct.C||0)) / t;
+    let y = ((p.pct.D||0) - (p.pct.S||0)) / t;
+    const mag = Math.sqrt(x*x+y*y);
+    if (mag > 0) { const scale = Math.min(mag*1.8, 0.88); x = x/mag*scale; y = y/mag*scale; }
+    return { x: 190 + x*170, y: 190 - y*170 };
+  }
+
+  const dotsSVG = quadDots.map(d => {
+    const {x, y} = dotXY(d.profile);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" fill="${d.color}" stroke="white" stroke-width="2"/>
+    <text x="${(x+13).toFixed(1)}" y="${(y+4).toFixed(1)}" font-size="10" font-weight="600" fill="${d.color}">${d.label}</text>`;
+  }).join('');
+
+  const ctxCards = [
+    ['At work',       contexts.work,     '#185FA5', '#E6F1FB'],
+    ['At home',       contexts.home,     '#BA7517', '#FAEEDA'],
+    ['As a leader',   contexts.leader,   '#0C447C', '#E6F1FB'],
+    ['As a follower', contexts.follower, '#D85A30', '#FAECE7'],
+    ['Under pressure',contexts.pressure, '#A32D2D', '#FCEBEB'],
+    ['With others',   contexts.others,   '#534AB7', '#EEEDFE'],
+  ].map(([lbl,p,c,bg]) =>
+    `<div class="ctx-card">
+      <div class="cl">${lbl}</div>
+      <div class="cs" style="color:${c};">${p.style}</div>
+      <div class="ci">${p.pct[p.primary]}% ${p.primary} · ${p.intensity}</div>
+    </div>`
+  ).join('');
+
+  const adaptTableRows = [
+    ['D','#185FA5', 'Match their pace. Lead with the result, skip the preamble. They respect confidence and competence, not deference. If you disagree, hold your ground with a clear logical argument. Watch for competitive escalation and redirect it toward the shared goal rather than allowing it to become personal.'],
+    ['i','#D85A30', 'Acknowledge their ideas visibly and with genuine warmth. They need to feel energised by you before they will deliver for you. A brief personal exchange before getting to the task makes a material difference. Avoid communicating in pure task mode, as they read that as coldness and disengage accordingly.'],
+    ['S','#1D9E75', 'Slow your pace slightly and ask for their input, then wait for the full answer before responding. Give them time to process any change before demanding a commitment. Never surprise them with sudden shifts in direction. They are your most loyal and steady collaborators when you invest consistently in the relationship.'],
+    ['C','#BA7517', 'Provide data, time and room to analyse before expecting a decision. Validate their precision rather than treating it as an obstacle to speed. They will identify errors you created by moving fast, and their quality instinct combined with your decision speed is genuinely complementary when both are respected.'],
+  ].map(([s,c,tip]) =>
+    `<tr>
+      <td><span class="sname" style="color:${c};">${s}</span></td>
+      <td>${STYLE_LABELS[s] || s}</td>
+      <td>${tip}</td>
+    </tr>`
+  ).join('');
+
+  const eqCards = mindsets.map(m => {
+    const cls = m.alignment === 'natural' ? 'eq-natural' : m.alignment === 'stretch' ? 'eq-stretch' : 'eq-challenge';
+    const lbl = m.alignment === 'natural' ? 'Natural' : m.alignment === 'stretch' ? 'Stretch' : 'Challenge';
+    return `<div class="eq-card">
+      <div class="eq-name">${m.name}</div>
+      <div class="eq-def">${m.def}</div>
+      <span class="eq-badge ${cls}">${lbl}</span>
+    </div>`;
+  }).join('');
+
+  const conflictData = {
+    D: { driver:'Winning, control, asserting position', destructive:'Hypercriticism, finger-pointing, aggressive bluntness', productive:'Frame it as a shared problem to solve. Set a time limit on debate. Commit to hearing the other position fully before responding.' },
+    i: { driver:'Being heard, emotional expression, approval', destructive:'Gossiping, dramatising, impulsive outbursts', productive:'Separate facts from feelings before entering the conversation. Commit to follow-through on whatever is agreed.' },
+    S: { driver:'Harmony, consensus, avoiding hurt feelings', destructive:'Passive resistance, silent resentment, excessive accommodation', productive:'Name your actual position rather than deferring. Productive disagreement does not break good relationships.' },
+    C: { driver:'Accuracy, fairness, logical resolution', destructive:'Withdrawal, over-analysis, withholding engagement', productive:'Set a decision deadline. Accept that some uncertainty is unavoidable and that imperfect action beats prolonged deliberation.' },
+  };
+  const cf = conflictData[adapted.primary] || conflictData.D;
+
+  const actionItems = {
+    D: { start:'Ask one genuine question before giving your answer in the next difficult conversation.', stop:'Deciding for others without consulting them, even when you are confident you are right.', invest:'Someone on your team whose style is C or S and who rarely pushes back on your ideas.' },
+    i: { start:'Writing down your three most important commitments each morning and reviewing them at the end of the day.', stop:'Agreeing to things in the moment that you do not have capacity to deliver on.', invest:'A peer who operates with high precision and can quality-check your outputs before they go out.' },
+    S: { start:'Stating your actual opinion in the next meeting where you feel the urge to defer to the group.', stop:'Absorbing other people\'s load silently instead of flagging when you are at capacity.', invest:'A colleague who will give you direct, honest feedback and who you currently avoid asking.' },
+    C: { start:'Making one decision each day with 70 percent of the information you would ideally want.', stop:'Revisiting decisions that have already been made and implementing them.', invest:'Someone whose energy and social confidence is high, and whose instinct to move quickly you currently judge as reckless.' },
+  };
+  const ai = actionItems[adapted.primary] || actionItems.D;
+
+  const relBadgeClass = reliability === 'High' ? 'rel-high' : 'rel-mod';
+
+  const date = new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'long', year:'numeric' });
+
+  const html = `
+  <div class="report-hero">
+    <div class="report-badge">${adapted.primary}</div>
+    <div class="report-hero-txt">
+      <h2>${firstName}'s DISC Multi-Context Report</h2>
+      <p>Primary style: ${STYLE_LABELS[adapted.primary] || adapted.primary} &nbsp;|&nbsp; ${adapted.intensity} inclination &nbsp;|&nbsp; ${date}</p>
+      <div class="style-pills">
+        <span class="style-pill">Adapted: ${adapted.style}</span>
+        <span class="style-pill">Natural: ${natural.style}</span>
+        <span class="style-pill">Energy drain: ${drain}/100</span>
+        <span class="style-pill ${relBadgeClass}" style="background:${reliability==='High'?'rgba(29,158,117,.25)':'rgba(186,117,23,.25)'};">Reliability: ${reliability}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 1: Context profiles -->
+  <div class="r-section">
+    <div class="r-section-title">1. Your 6-context profile overview</div>
+    <div class="ctx-grid">${ctxCards}</div>
+    <div class="chart-legend">
+      <span><i style="background:#185FA5;"></i> D — Dominance</span>
+      <span><i style="background:#D85A30;"></i> i — Influence</span>
+      <span><i style="background:#1D9E75;"></i> S — Steadiness</span>
+      <span><i style="background:#BA7517;"></i> C — Conscientiousness</span>
+    </div>
+    <div class="chart-wrap"><canvas id="ctxChart"></canvas></div>
+  </div>
+
+  <!-- Section 2: 8-quadrant map -->
+  <div class="r-section">
+    <div class="r-section-title">2. 8-quadrant DISC map — all context dots</div>
+    <div class="quadrant-wrap">
+      <svg viewBox="0 0 380 380" width="100%" style="max-width:340px;">
+        <circle cx="190" cy="190" r="175" fill="#F8F8F7" stroke="#CCCCCC" stroke-width="1"/>
+        <circle cx="190" cy="190" r="120" fill="none" stroke="#E8E8E8" stroke-width="0.8" stroke-dasharray="4,3"/>
+        <circle cx="190" cy="190" r="65"  fill="none" stroke="#E8E8E8" stroke-width="0.8" stroke-dasharray="4,3"/>
+        <line x1="190" y1="15"  x2="190" y2="365" stroke="#DDDDDD" stroke-width="1"/>
+        <line x1="15"  y1="190" x2="365" y2="190" stroke="#DDDDDD" stroke-width="1"/>
+        <line x1="66" y1="66" x2="314" y2="314" stroke="#EEEEEE" stroke-width="0.7" stroke-dasharray="3,3"/>
+        <line x1="314" y1="66" x2="66" y2="314" stroke="#EEEEEE" stroke-width="0.7" stroke-dasharray="3,3"/>
+        <text x="190" y="26"  text-anchor="middle" font-size="14" font-weight="700" fill="#185FA5">D</text>
+        <text x="190" y="371" text-anchor="middle" font-size="14" font-weight="700" fill="#1D9E75">S</text>
+        <text x="11"  y="194" text-anchor="middle" font-size="14" font-weight="700" fill="#BA7517">C</text>
+        <text x="369" y="194" text-anchor="middle" font-size="14" font-weight="700" fill="#D85A30">i</text>
+        <text x="288" y="52"  text-anchor="middle" font-size="10" fill="#999">Di</text>
+        <text x="105" y="52"  text-anchor="middle" font-size="10" fill="#999">CD</text>
+        <text x="52"  y="118" text-anchor="middle" font-size="10" fill="#999">C</text>
+        <text x="52"  y="270" text-anchor="middle" font-size="10" fill="#999">CS</text>
+        <text x="105" y="336" text-anchor="middle" font-size="10" fill="#999">SC</text>
+        <text x="288" y="336" text-anchor="middle" font-size="10" fill="#999">iS</text>
+        <text x="336" y="270" text-anchor="middle" font-size="10" fill="#999">S</text>
+        <text x="336" y="118" text-anchor="middle" font-size="10" fill="#999">iD</text>
+        ${computedDots}
+      </svg>
+    </div>
+    <p style="font-size:12px;color:var(--text-lt);text-align:center;">Dots closer to the edge indicate stronger inclination toward that style. The centre indicates mild inclination.</p>
+  </div>
+
+  <!-- Section 3: Adapted vs Natural -->
+  <div class="r-section">
+    <div class="r-section-title">3. Your adapted style — how you show up in role</div>
+    ${['D','i','S','C'].map(d => `
+    <div class="score-row">
+      <div class="score-dim" style="color:${DIM_COLORS[d]};">${d}</div>
+      ${scoreBar(adapted.pct[d]||0, DIM_COLORS[d])}
+      <div class="score-pct" style="color:${DIM_COLORS[d]};">${adapted.pct[d]||0}%</div>
+    </div>`).join('')}
+  </div>
+
+  <div class="r-section">
+    <div class="r-section-title">4. Your natural style — how you show up when relaxed</div>
+    ${['D','i','S','C'].map(d => `
+    <div class="score-row">
+      <div class="score-dim" style="color:${DIM_COLORS[d]};">${d}</div>
+      ${scoreBar(natural.pct[d]||0, DIM_COLORS[d])}
+      <div class="score-pct" style="color:${DIM_COLORS[d]};">${natural.pct[d]||0}%</div>
+    </div>`).join('')}
+    <div class="chart-wrap" style="height:220px;margin-top:16px;"><canvas id="natAdpChart"></canvas></div>
+  </div>
+
+  <!-- Section 4: Energy Drain -->
+  <div class="r-section">
+    <div class="r-section-title">5. Energy drain score</div>
+    <div class="drain-gauge">
+      <div class="drain-circle" style="background:${drainBg};">
+        <div class="drain-num" style="color:${drainColor};">${drain}</div>
+        <div class="drain-lbl" style="color:${drainColor};">${drainLevel}</div>
+      </div>
+      <div class="drain-info">
+        <h4>Energy drain: ${drainLevel} (${drain}/100)</h4>
+        <p>${drain >= 25
+          ? `Your adapted and natural styles differ significantly. Sustaining your professional role requires meaningful effort because you are consistently performing outside your comfort zone. This is a burnout risk indicator. Scheduling deliberate recovery time and reducing unnecessary masking where possible will help preserve your capacity.`
+          : drain >= 15
+          ? `Your adapted and natural styles show moderate divergence. You are adjusting your behaviour at work, which is normal and generally manageable. Pay attention to sustained periods when you cannot access your natural style at all, as these tend to be the conditions under which strain builds up gradually.`
+          : `Your adapted and natural styles are closely aligned. The effort required to perform your professional role is relatively low. This is an indicator of a good fit between your natural tendencies and the demands of your current context.`
+        }</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 5: Work vs Home -->
+  <div class="r-section">
+    <div class="r-section-title">6. Work versus home comparison</div>
+    <div class="chart-wrap"><canvas id="wvhChart"></canvas></div>
+    <div class="insight-box">
+      <div class="insight-title">Work style: ${contexts.work.style} (${contexts.work.pct[contexts.work.primary]}% ${contexts.work.primary}) &nbsp;|&nbsp; Home style: ${contexts.home.style} (${contexts.home.pct[contexts.home.primary]}% ${contexts.home.primary})</div>
+      <div class="insight-body">The gap between your work and home profiles is ${Math.abs((contexts.work.pct[contexts.work.primary]||0) - (contexts.home.pct[contexts.home.primary]||0))} percentage points. ${
+        Math.abs((contexts.work.pct[contexts.work.primary]||0) - (contexts.home.pct[contexts.home.primary]||0)) >= 25
+          ? 'This is a significant polarity. The people who know you only professionally would likely be surprised by your home profile, and the people who know you only personally may not recognise the person your colleagues describe. Both profiles are authentically yours.'
+          : Math.abs((contexts.work.pct[contexts.work.primary]||0) - (contexts.home.pct[contexts.home.primary]||0)) >= 15
+          ? 'This is a notable shift between contexts. You bring different energy and priorities to work versus personal life, which is healthy. Be aware of the moments when you carry your work style into personal situations where a different approach would serve you better.'
+          : 'Your work and home styles are closely aligned. You tend to bring similar energy and priorities to both contexts, which reduces the internal effort of context-switching.'
+      }</div>
+    </div>
+  </div>
+
+  <!-- Section 6: Leader vs Follower -->
+  <div class="r-section">
+    <div class="r-section-title">7. Leader versus follower tension index</div>
+    <div class="chart-wrap" style="height:180px;"><canvas id="tensionChart"></canvas></div>
+    <div class="insight-box ${Math.abs((contexts.leader.pct[contexts.leader.primary]||0)-(contexts.follower.pct[contexts.follower.primary]||0)) >= 25 ? 'red' : 'amber'}">
+      <div class="insight-title">Leader style: ${contexts.leader.style} &nbsp;|&nbsp; Follower style: ${contexts.follower.style} &nbsp;|&nbsp; Gap: ${Math.abs((contexts.leader.pct[contexts.leader.primary]||0)-(contexts.follower.pct[contexts.follower.primary]||0))} points</div>
+      <div class="insight-body">A gap of ${Math.abs((contexts.leader.pct[contexts.leader.primary]||0)-(contexts.follower.pct[contexts.follower.primary]||0))} points between your leader and follower styles means you operate very differently depending on whether you hold formal authority. In any role where you must simultaneously lead downward and follow upward, you will experience genuine internal tension. Naming this tension clearly, rather than suppressing it, is the most practical way to manage it.</div>
+    </div>
+  </div>
+
+  <!-- Section 7: Under Pressure -->
+  <div class="r-section">
+    <div class="r-section-title">8. You under pressure</div>
+    <div class="insight-box">
+      <div class="insight-title">Pressure style: ${contexts.pressure.style} (${contexts.pressure.pct[contexts.pressure.primary]}% ${contexts.pressure.primary} · ${contexts.pressure.intensity})</div>
+      <div class="insight-body">Under significant stress your profile shifts to ${contexts.pressure.style}. ${
+        contexts.pressure.primary === 'D'
+          ? 'Your D pressure response means you become more directive, more urgent and more controlling when stakes are high. You tend to take over rather than collaborate. The risk is that people around you comply on the surface but disengage genuinely, which you may misread as alignment.'
+          : contexts.pressure.primary === 'i'
+          ? 'Your i pressure response means you become more expressive, more social and more emotionally charged when stakes are high. You may overpromise or scatter your energy across too many fronts. The risk is that your enthusiasm reads as instability to the people you most need to reassure.'
+          : contexts.pressure.primary === 'S'
+          ? 'Your S pressure response means you become more accommodating, more withdrawn and less likely to advocate for your own needs when stakes are high. You absorb strain without naming it, which builds up over time. The risk is that you reach a point of depletion that surprises both you and the people around you.'
+          : 'Your C pressure response means you become more analytical, more cautious and more reluctant to act without sufficient information when stakes are high. You may overthink when speed is what the situation actually demands. The risk is that your rigour becomes paralysis at the precise moment when decisive action would serve you best.'
+      }</div>
+    </div>
+  </div>
+
+  <!-- Section 8: EQ Mindsets -->
+  <div class="r-section">
+    <div class="r-section-title">9. Your EQ mindset map</div>
+    <div class="eq-grid">${eqCards}</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:12px;">
+      <span style="display:flex;align-items:center;gap:5px;"><span style="width:10px;height:10px;border-radius:50%;background:#1D9E75;display:inline-block;"></span> Natural — comes easily from your style</span>
+      <span style="display:flex;align-items:center;gap:5px;"><span style="width:10px;height:10px;border-radius:50%;background:#BA7517;display:inline-block;"></span> Stretch — requires deliberate effort</span>
+      <span style="display:flex;align-items:center;gap:5px;"><span style="width:10px;height:10px;border-radius:50%;background:#A32D2D;display:inline-block;"></span> Challenge — requires significant conscious work</span>
+    </div>
+  </div>
+
+  <!-- Section 9: Conflict style -->
+  <div class="r-section">
+    <div class="r-section-title">10. Your conflict style</div>
+    <div class="conflict-grid">
+      <div class="conflict-card">
+        <div class="cc-label">What drives you in conflict</div>
+        <div class="cc-title">Core driver</div>
+        <div class="cc-body">${cf.driver}</div>
+      </div>
+      <div class="conflict-card">
+        <div class="cc-label">What to watch for</div>
+        <div class="cc-title">Destructive tendencies</div>
+        <div class="cc-body">${cf.destructive}</div>
+      </div>
+    </div>
+    <div class="insight-box green" style="margin-top:10px;">
+      <div class="insight-title">How to make conflict productive</div>
+      <div class="insight-body">${cf.productive}</div>
+    </div>
+  </div>
+
+  <!-- Section 10: Working with others -->
+  <div class="r-section">
+    <div class="r-section-title">11. Working with each style</div>
+    <div style="overflow-x:auto;">
+      <table class="adapt-table">
+        <thead><tr><th>Style</th><th>Name</th><th>Your adapted approach</th></tr></thead>
+        <tbody>${adaptTableRows}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Section 11: Radar -->
+  <div class="r-section">
+    <div class="r-section-title">12. Full radar — all 7 profiles</div>
+    <div class="chart-legend">
+      <span><i style="background:#185FA5;"></i>Work</span>
+      <span><i style="background:#BA7517;"></i>Home</span>
+      <span><i style="background:#0C447C;"></i>Leader</span>
+      <span><i style="background:#D85A30;"></i>Follower</span>
+      <span><i style="background:#A32D2D;"></i>Pressure</span>
+      <span><i style="background:#534AB7;"></i>Others</span>
+      <span><i style="background:#1D9E75;"></i>Natural</span>
+    </div>
+    <div class="chart-wrap-tall"><canvas id="radarChart"></canvas></div>
+  </div>
+
+  <!-- Section 12: Action plan -->
+  <div class="r-section">
+    <div class="r-section-title">13. Your personalised action plan</div>
+    <div class="action-grid">
+      <div class="action-card">
+        <span class="ac-label ac-start">Start</span>
+        <div class="ac-title">One behaviour to begin</div>
+        <div class="ac-body">${ai.start}</div>
+      </div>
+      <div class="action-card">
+        <span class="ac-label ac-stop">Stop</span>
+        <div class="ac-title">One habit to discontinue</div>
+        <div class="ac-body">${ai.stop}</div>
+      </div>
+      <div class="action-card">
+        <span class="ac-label ac-invest">Invest</span>
+        <div class="ac-title">One relationship to develop</div>
+        <div class="ac-body">${ai.invest}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="print-btn-row">
+    <button class="btn-print" onclick="window.print()">Print report</button>
+    <button class="btn-print outline" onclick="window.location.reload()">Start new assessment</button>
+  </div>
+  <div class="footer-note">
+    Generated by Trident Talents DISC Assessment Engine &nbsp;|&nbsp; ${date}<br>
+    This report is for personal development purposes. Results reflect self-reported behavioural preferences, not psychological diagnosis.
+  </div>
+  `;
+
+  document.getElementById('report-container').innerHTML = html;
+
+  // Build charts after DOM is ready
+  setTimeout(() => buildCharts(R), 100);
+}
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// CHARTS
+// ══════════════════════════════════════════════════════════════════════
+function buildCharts(R) {
+  const { adapted, natural, contexts } = R;
+  const dims = ['D','i','S','C'];
+  const dc = ['#185FA5','#D85A30','#1D9E75','#BA7517'];
+
+  // Context stacked bar
+  const ctxEl = document.getElementById('ctxChart');
+  if (ctxEl) {
+    const ctxLabels = ['Work','Home','Leader','Follower','Pressure','Others'];
+    const ctxData = [contexts.work, contexts.home, contexts.leader, contexts.follower, contexts.pressure, contexts.others];
+    new Chart(ctxEl, {
+      type: 'bar',
+      data: {
+        labels: ctxLabels,
+        datasets: dims.map((d,i) => ({
+          label: d,
+          data: ctxData.map(c => c.pct[d]||0),
+          backgroundColor: dc[i],
+          borderRadius: 3,
+        }))
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { stacked: true, grid:{display:false}, ticks:{color:'#888',font:{size:11}} },
+          y: { stacked: true, max:100, ticks:{callback:v=>v+'%',color:'#888',font:{size:10}}, grid:{color:'rgba(0,0,0,0.04)'} }
+        }
+      }
+    });
+  }
+
+  // Adapted vs Natural comparison
+  const naEl = document.getElementById('natAdpChart');
+  if (naEl) {
+    new Chart(naEl, {
+      type: 'bar',
+      data: {
+        labels: dims.map(d => d + ' — ' + ['Dominance','Influence','Steadiness','Conscientiousness'][['D','i','S','C'].indexOf(d)]),
+        datasets: [
+          { label:'Adapted', data: dims.map(d => adapted.pct[d]||0), backgroundColor:'#185FA5', borderRadius:4 },
+          { label:'Natural', data: dims.map(d => natural.pct[d]||0), backgroundColor:'#1D9E75', borderRadius:4 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display:true, position:'top', labels:{boxWidth:10,padding:12,font:{size:11},color:'#666'} } },
+        scales: {
+          x: { grid:{display:false}, ticks:{color:'#888',font:{size:11},autoSkip:false} },
+          y: { max:100, ticks:{callback:v=>v+'%',color:'#888',font:{size:10}}, grid:{color:'rgba(0,0,0,0.04)'} }
+        }
+      }
+    });
+  }
+
+  // Work vs Home
+  const wvhEl = document.getElementById('wvhChart');
+  if (wvhEl) {
+    new Chart(wvhEl, {
+      type: 'bar',
+      data: {
+        labels: dims.map(d => d),
+        datasets: [
+          { label:'At work', data: dims.map(d => contexts.work.pct[d]||0), backgroundColor:'#185FA5', borderRadius:4 },
+          { label:'At home', data: dims.map(d => contexts.home.pct[d]||0), backgroundColor:'#BA7517', borderRadius:4 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display:true, position:'top', labels:{boxWidth:10,padding:12,font:{size:11},color:'#666'} } },
+        scales: {
+          x: { grid:{display:false}, ticks:{color:'#888',font:{size:12}} },
+          y: { max:100, ticks:{callback:v=>v+'%',color:'#888',font:{size:10}}, grid:{color:'rgba(0,0,0,0.04)'} }
+        }
+      }
+    });
+  }
+
+  // Leader vs Follower tension
+  const tnEl = document.getElementById('tensionChart');
+  if (tnEl) {
+    new Chart(tnEl, {
+      type: 'bar',
+      indexAxis: 'y',
+      data: {
+        labels: ['Leader','Follower'],
+        datasets: dims.map((d,i) => ({
+          label: d,
+          data: [contexts.leader.pct[d]||0, contexts.follower.pct[d]||0],
+          backgroundColor: dc[i],
+          borderRadius: 3,
+        }))
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display:false } },
+        scales: {
+          x: { stacked:true, max:100, ticks:{callback:v=>v+'%',color:'#888',font:{size:10}}, grid:{color:'rgba(0,0,0,0.04)'} },
+          y: { stacked:true, grid:{display:false}, ticks:{color:'#888',font:{size:12}} }
+        }
+      }
+    });
+  }
+
+  // Radar
+  const radEl = document.getElementById('radarChart');
+  if (radEl) {
+    new Chart(radEl, {
+      type: 'radar',
+      data: {
+        labels: dims,
+        datasets: [
+          { label:'Work',     data:dims.map(d=>contexts.work.pct[d]||0),     borderColor:'#185FA5', backgroundColor:'rgba(24,95,165,.07)',  pointBackgroundColor:'#185FA5', borderWidth:2, pointRadius:4 },
+          { label:'Home',     data:dims.map(d=>contexts.home.pct[d]||0),     borderColor:'#BA7517', backgroundColor:'rgba(186,117,23,.07)', pointBackgroundColor:'#BA7517', borderWidth:2, pointRadius:4 },
+          { label:'Leader',   data:dims.map(d=>contexts.leader.pct[d]||0),   borderColor:'#0C447C', backgroundColor:'rgba(12,68,124,.05)',  pointBackgroundColor:'#0C447C', borderWidth:2, pointRadius:4 },
+          { label:'Follower', data:dims.map(d=>contexts.follower.pct[d]||0), borderColor:'#D85A30', backgroundColor:'rgba(216,90,48,.05)',  pointBackgroundColor:'#D85A30', borderWidth:2, pointRadius:4 },
+          { label:'Pressure', data:dims.map(d=>contexts.pressure.pct[d]||0), borderColor:'#A32D2D', backgroundColor:'rgba(163,45,45,.04)',  pointBackgroundColor:'#A32D2D', borderWidth:2, pointRadius:4 },
+          { label:'Others',   data:dims.map(d=>contexts.others.pct[d]||0),   borderColor:'#534AB7', backgroundColor:'rgba(83,74,183,.04)',  pointBackgroundColor:'#534AB7', borderWidth:2, pointRadius:4 },
+          { label:'Natural',  data:dims.map(d=>natural.pct[d]||0),           borderColor:'#1D9E75', backgroundColor:'rgba(29,158,117,.06)', pointBackgroundColor:'#1D9E75', borderWidth:2.5, pointRadius:5, borderDash:[5,3] },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display:true, position:'bottom', labels:{ boxWidth:10, padding:12, font:{size:11}, color:'#666' } } },
+        scales: { r: { min:0, max:80, ticks:{ stepSize:20, callback:v=>v+'%', font:{size:9}, color:'#AAA', backdropColor:'transparent' }, grid:{color:'rgba(0,0,0,0.06)'}, pointLabels:{font:{size:13,weight:'700'},color:'#444'} } }
+      }
+    });
+  }
+}
+</script>
+</body>
+</html>
