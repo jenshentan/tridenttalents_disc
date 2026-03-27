@@ -1441,7 +1441,7 @@ function submitGate() {
         reliability:       RESULTS.reliability,
         date_completed:    date + ' at ' + time,
         time_to_complete:  getElapsedTime(),
-        pdf_download_url:  pdfUrl || 'PDF stored locally — respondent downloads via browser print',
+        pdf_download_url:  pdfUrl || '',
       }, EMAILJS_PUBLIC_KEY)
       .then(() => console.log('Lead captured via EmailJS'))
       .catch(err => console.warn('EmailJS error (non-blocking):', err));
