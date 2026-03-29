@@ -891,7 +891,7 @@
       <div class="field-row">
         <label for="inp-email">Work email address <span style="color:#A32D2D;">*</span></label>
         <input type="email" id="inp-email" placeholder="your@company.com" autocomplete="email" oninput="validateField('email')">
-        <div class="field-error" id="err-email">Please enter a valid email address, e.g. name@company.com</div>
+        <div class="field-error" id="err-email">Please enter a valid email address, e.g. <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="9df3fcf0f8ddfef2f0edfcf3e4b3fef2f0">[email&#160;protected]</a></div>
         <div class="field-success" id="ok-email">Valid email address.</div>
       </div>
       <div class="field-row">
@@ -920,7 +920,7 @@
   <div class="container" id="report-container"></div>
 </div>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // ══════════════════════════════════════════════════════════════════════
 // QUESTION DATA
 // ══════════════════════════════════════════════════════════════════════
@@ -1121,7 +1121,9 @@ function startAssessment() {
 
 function navigate(dir) {
   if (dir === 1 && current === QS.length - 1) {
+    const capturedSeconds = timerSeconds;
     stopTimer();
+    timerSeconds = capturedSeconds; // preserve elapsed time for PDF report
     show('gate');
     return;
   }
@@ -2804,11 +2806,4 @@ function buildCharts(R) {
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display:true, position:'bottom', labels:{ boxWidth:10, padding:12, font:{size:11}, color:'#666' } } },
-        scales: { r: { min:0, max:80, ticks:{ stepSize:20, callback:v=>v+'%', font:{size:9}, color:'#AAA', backdropColor:'transparent' }, grid:{color:'rgba(0,0,0,0.06)'}, pointLabels:{font:{size:13,weight:'700'},color:'#444'} } }
-      }
-    });
-  }
-}
-</script>
-</body>
-</html>
+        scales: { r: { min:0, max:80, ticks:{ stepS
