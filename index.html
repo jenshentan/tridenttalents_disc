@@ -840,7 +840,7 @@
         <li>Your results and a personalised report will be generated automatically when you finish.</li>
       </ul>
     </div>
-    <button class="btn-start" onclick="startAssessment()">Begin Assessment</button>
+    <button class="btn-start" onclick="window.startAssessment()">Begin Assessment</button>
     <p style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:16px;text-align:center;line-height:1.6;">
       Copyright &copy; Trident Talents Training &amp; Consultancy Sdn Bhd. Original content. Duplication not allowed.
     </p>
@@ -1113,13 +1113,13 @@ function show(id) {
   document.getElementById('screen-' + id).classList.add('active');
 }
 
-function startAssessment() {
+window.startAssessment = function() {
   show('assessment');
   startTimer();
   renderQuestion();
 }
 
-function navigate(dir) {
+window.navigate = function(dir) {
   if (dir === 1 && current === QS.length - 1) {
     const capturedSeconds = timerSeconds;
     stopTimer();
@@ -1203,7 +1203,7 @@ function renderQuestion() {
   window.scrollTo({top: 0, behavior: 'smooth'});
 }
 
-function pick(i) {
+window.pick = function(i) {
   answers[current] = i;
   renderQuestion();
   // Auto-advance: brief delay so the selected state is visible before moving
@@ -1216,7 +1216,7 @@ function pick(i) {
     nx.disabled = false;
   }
 }
-function pickFC(v) {
+window.pickFC = function(v) {
   answers[current] = v;
   renderQuestion();
   // Auto-advance forced-choice questions too
@@ -1350,7 +1350,7 @@ function hideSubmitError() {
   document.getElementById('gate-submit-error').classList.remove('visible');
 }
 
-function submitGate() {
+window.submitGate = function() {
   hideSubmitError();
   if (!validateAll()) {
     showSubmitError('Please fix the fields highlighted above before continuing.');
@@ -2988,7 +2988,7 @@ function buildReport(R) {
 // ══════════════════════════════════════════════════════════════════════
 // PDF DOWNLOAD, global scope so onclick can access it
 // ══════════════════════════════════════════════════════════════════════
-function downloadPDF(name) {
+window.downloadPDF = function(name) {
   const safeName = (name || 'Report').replace(/[^a-zA-Z0-9 ]/g, '').trim() || 'Report';
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const original = document.title;
