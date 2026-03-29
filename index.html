@@ -7,6 +7,42 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script>
+  // ══════════════════════════════════════════════════════════════════
+  // ONE-TIME TOKEN SYSTEM
+  // Links should be sent as: yourpage.html?token=UNIQUE_CODE
+  // Once a token is used, it is recorded in localStorage.
+  // Forwarding the link to a new device/browser will still work
+  // (client-side only). For hard enforcement, burn the token in
+  // your Cloudflare Worker (see comments in submitGate).
+  // ══════════════════════════════════════════════════════════════════
+  (function() {
+    const params = new URLSearchParams(window.location.search);
+    const token  = params.get('token');
+
+    // If no token at all → open access (for dev / direct visits)
+    if (!token) return;
+
+    const storageKey = 'disc_used_token_' + token;
+    const usedAt     = localStorage.getItem(storageKey);
+
+    if (usedAt) {
+      // Token already used — set a flag; the welcome screen init will show the block UI
+      window.__discTokenBlocked = usedAt;
+      return;
+    }
+
+    // Token is fresh — store it when the report is actually submitted
+    // We expose it so submitGate can call it at the right moment
+    window.__discToken = token;
+    window.__discBurnToken = function() {
+      const now = new Date().toLocaleString('en-GB', {
+        day:'2-digit', month:'long', year:'numeric',
+        hour:'2-digit', minute:'2-digit'
+      });
+      localStorage.setItem(storageKey, now);
+    };
+  })();
+
   window.addEventListener('load', function() {
     if (typeof emailjs !== 'undefined') {
       emailjs.init('0LbBnKNhhtQ2KkPvP');
@@ -629,6 +665,14 @@
     transition: border-color .12s;
   }
   .btn-new:hover { border-color: var(--text-mid); }
+  .btn-new-locked {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 20px;
+    background: var(--gray2); color: var(--gray4);
+    border: 1.5px solid var(--gray3); border-radius: var(--radius);
+    font-size: 13px; cursor: not-allowed;
+    user-select: none;
+  }
 
   /* ── PRINT / PDF STYLES ──────────────────────────────────────────── */
   @media print {
@@ -891,8 +935,14 @@
       <div class="field-row">
         <label for="inp-email">Work email address <span style="color:#A32D2D;">*</span></label>
         <input type="email" id="inp-email" placeholder="your@company.com" autocomplete="email" oninput="validateField('email')">
-        <div class="field-error" id="err-email">Please enter a valid email address, e.g. <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="9df3fcf0f8ddfef2f0edfcf3e4b3fef2f0">[email&#160;protected]</a></div>
+        <div class="field-error" id="err-email">Please enter a valid email address, e.g. name@company.com</div>
         <div class="field-success" id="ok-email">Valid email address.</div>
+      </div>
+      <div class="field-row">
+        <label for="inp-email2">Confirm email address <span style="color:#A32D2D;">*</span></label>
+        <input type="email" id="inp-email2" placeholder="Re-enter your email address" autocomplete="off" oninput="validateField('email2')">
+        <div class="field-error" id="err-email2">Email addresses do not match. Please check and try again.</div>
+        <div class="field-success" id="ok-email2">Email addresses match.</div>
       </div>
       <div class="field-row">
         <label for="inp-org">Company name <span style="color:#A32D2D;">*</span></label>
@@ -1042,6 +1092,34 @@ let LOGO_SRC = '';
 window.addEventListener('DOMContentLoaded', () => {
   const navImg = document.querySelector('.nav img');
   if (navImg) LOGO_SRC = navImg.src;
+
+  // ── Token block check ─────────────────────────────────────────────
+  if (window.__discTokenBlocked) {
+    const usedAt = window.__discTokenBlocked;
+    // Hide all screens, show block UI inside welcome screen
+    document.querySelectorAll('.screen').forEach(s => s.style.display = 'none');
+    const blockDiv = document.createElement('div');
+    blockDiv.style.cssText = 'min-height:80vh;display:flex;align-items:center;justify-content:center;';
+    blockDiv.innerHTML = `
+      <div style="max-width:440px;width:90%;background:white;border:1px solid rgba(0,0,0,0.10);border-radius:14px;padding:40px 36px;text-align:center;">
+        <div style="width:64px;height:64px;border-radius:50%;background:#FCEBEB;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#A32D2D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:30px;height:30px;">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+          </svg>
+        </div>
+        <h2 style="font-size:20px;font-weight:700;color:#1A1A1A;margin-bottom:10px;letter-spacing:-.3px;">This link has already been used</h2>
+        <p style="font-size:14px;color:#777;line-height:1.7;margin-bottom:24px;">
+          Your DISC assessment link is valid for one attempt only.<br>
+          This session was completed on <strong>${usedAt}</strong>.
+        </p>
+        <p style="font-size:13px;color:#aaa;line-height:1.6;">
+          If you believe this is an error or would like to purchase a new assessment,
+          please contact <strong>Trident Talents</strong>.
+        </p>
+      </div>`;
+    document.body.appendChild(blockDiv);
+    return; // stop — don't run normal init
+  }
 
   // Check if URL contains ?report=ID, load saved report directly
   const urlParams = new URLSearchParams(window.location.search);
@@ -1303,14 +1381,19 @@ function computeAll() {
 // ── Field validation helpers ──────────────────────────────────────────
 function validateField(field) {
   const rules = {
-    name:  { el:'inp-name',  test: v => v.trim().length >= 2,
-              msg: 'Please enter your full name (at least 2 characters).' },
-    email: { el:'inp-email', test: v => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim()),
-              msg: 'Please enter a valid email address, e.g. name@company.com' },
-    org:   { el:'inp-org',   test: v => v.trim().length >= 2,
-              msg: 'Please enter your company or organisation name.' },
-    phone: { el:'inp-phone', test: v => /^[\d\s\+\-\(\)]{7,20}$/.test(v.trim()),
-              msg: 'Please enter a valid contact number (7 to 20 digits, spaces and + allowed).' },
+    name:   { el:'inp-name',   test: v => v.trim().length >= 2,
+               msg: 'Please enter your full name (at least 2 characters).' },
+    email:  { el:'inp-email',  test: v => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim()),
+               msg: 'Please enter a valid email address, e.g. name@company.com' },
+    email2: { el:'inp-email2', test: v => {
+                const primary = document.getElementById('inp-email').value.trim();
+                return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim()) && v.trim().toLowerCase() === primary.toLowerCase();
+              },
+               msg: 'Email addresses do not match. Please check and try again.' },
+    org:    { el:'inp-org',    test: v => v.trim().length >= 2,
+               msg: 'Please enter your company or organisation name.' },
+    phone:  { el:'inp-phone',  test: v => /^[\d\s\+\-\(\)]{7,20}$/.test(v.trim()),
+               msg: 'Please enter a valid contact number (7 to 20 digits, spaces and + allowed).' },
   };
   const rule = rules[field];
   if (!rule) return true;
@@ -1318,6 +1401,20 @@ function validateField(field) {
   const val   = input.value;
   const errEl = document.getElementById('err-' + field);
   const okEl  = document.getElementById('ok-' + field);
+
+  // When primary email changes, re-validate confirm field live if it has a value
+  if (field === 'email') {
+    const confirm = document.getElementById('inp-email2');
+    if (confirm && confirm.value.trim()) validateField('email2');
+  }
+
+  const okMessages = {
+    name: 'Looks good.',
+    email: 'Valid email address.',
+    email2: 'Email addresses match. ✓',
+    org: 'Got it.',
+    phone: 'Valid number.',
+  };
   if (!val.trim()) {
     input.classList.remove('valid', 'error');
     errEl.classList.remove('visible');
@@ -1329,12 +1426,13 @@ function validateField(field) {
   input.classList.toggle('valid',  valid);
   errEl.textContent = rule.msg;
   errEl.classList.toggle('visible', !valid);
+  okEl.textContent = okMessages[field] || 'Looks good.';
   okEl.classList.toggle('visible',   valid);
   return valid;
 }
 
 function validateAll() {
-  const fields = ['name', 'email', 'org', 'phone'];
+  const fields = ['name', 'email', 'email2', 'org', 'phone'];
   let allValid = true;
   fields.forEach(f => { if (!validateField(f)) allValid = false; });
   return allValid;
@@ -1443,6 +1541,11 @@ window.submitGate = function() {
     buildReport(RESULTS);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     btn.textContent = 'View my report';
+
+    // Burn the one-time token (client-side) so this browser cannot restart
+    if (typeof window.__discBurnToken === 'function') {
+      window.__discBurnToken();
+    }
 
     // Step 2: Send metadata to Worker (non-blocking, runs in background)
     if (WORKER_ACTIVE) {
@@ -2976,7 +3079,12 @@ function buildReport(R) {
       </svg>
       Download PDF report
     </button>
-    <button class="btn-new" onclick="window.location.reload()">Start new assessment</button>
+    <div class="btn-new-locked" title="Each access link is valid for one attempt only.">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;flex-shrink:0;">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+      </svg>
+      Assessment completed
+    </div>
   `;
   const reportScreen = document.getElementById('screen-report');
   reportScreen.insertBefore(bar, reportScreen.firstChild);
