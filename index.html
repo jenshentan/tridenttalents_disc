@@ -743,12 +743,14 @@
       border-bottom: 1px solid #e8e8e8;
     }
     .print-header img {
-      height: 26px;
-      width: auto;
+      height: 28px !important;
+      width: auto !important;
+      max-width: 140px !important;
       display: block;
       background: #0C447C;
       border-radius: 4px;
-      padding: 3px 8px;
+      padding: 4px 10px;
+      object-fit: contain;
     }
     .print-header span {
       font-size: 11px;
@@ -1040,7 +1042,38 @@ let LOGO_SRC = '';
 window.addEventListener('DOMContentLoaded', () => {
   const navImg = document.querySelector('.nav img');
   if (navImg) LOGO_SRC = navImg.src;
+
+  // Check if URL contains ?report=ID, load saved report directly
+  const urlParams = new URLSearchParams(window.location.search);
+  const reportId  = urlParams.get('report');
+  if (reportId) {
+    loadSavedReport(reportId);
+  }
 });
+
+async function loadSavedReport(reportId) {
+  show('report');
+  document.getElementById('report-container').innerHTML = `
+    <div style="text-align:center;padding:80px 20px;color:var(--text-lt);">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Loading your report...</div>
+    </div>`;
+  try {
+    const workerBase = 'https://disc-assessment-worker.tridenttalents.workers.dev';
+    const res  = await fetch(workerBase + '/report?id=' + encodeURIComponent(reportId));
+    const data = await res.json();
+    if (!data.success || !data.results) throw new Error(data.error || 'Not found');
+    RESULTS = data.results;
+    buildReport(RESULTS);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (err) {
+    document.getElementById('report-container').innerHTML = `
+      <div style="text-align:center;padding:80px 20px;color:var(--text-lt);">
+        <div style="font-size:18px;font-weight:600;margin-bottom:8px;">Report not found</div>
+        <div style="font-size:14px;">This link may have expired. Please complete the assessment again at
+        <a href="${window.location.origin}" style="color:#185FA5;">this link</a>.</div>
+      </div>`;
+  }
+}
 let timerInterval = null;
 let timerSeconds = 0;
 
@@ -1394,72 +1427,186 @@ function submitGate() {
       pressure:RESULTS.contexts.pressure.pct,
       others:  RESULTS.contexts.others.pct,
     },
-    report_html: null,  // Populated below if Worker is active
+    report_html: null,
+    // Full RESULTS object, needed to rebuild report from URL link
+    full_results: JSON.parse(JSON.stringify(RESULTS)),
   };
 
   // ── Main flow: Worker → EmailJS → Show report ─────────────────────
   async function runAll() {
     let pdfUrl = null;
 
-    // Step 1: Call Worker to generate PDF and get download URL
-    if (WORKER_ACTIVE) {
-      try {
-        // Build the report DOM first (needed for HTML snapshot)
-        buildReport(RESULTS);
-        const reportHtml = document.getElementById('report-container').innerHTML;
-        workerPayload.report_html = reportHtml;
+    // Step 1: Show report IMMEDIATELY, never keep respondent waiting
+    show('report');
+    buildReport(RESULTS);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    btn.textContent = 'View my report';
 
-        btn.textContent = 'Saving your report...';
-        const workerRes = await fetch(WORKER_URL + '/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(workerPayload),
-        });
-        const workerData = await workerRes.json();
-        if (workerData.success && workerData.download_url) {
-          pdfUrl = workerData.download_url;
-          console.log('PDF stored at:', pdfUrl);
+    // Step 2: Send metadata to Worker (non-blocking, runs in background)
+    if (WORKER_ACTIVE) {
+      // Small delay to let report render fully before capturing
+      setTimeout(async () => {
+        try {
+          // Step 2a: Try to capture PDF from browser using print-to-blob
+          let pdfBlob = null;
+          try {
+            pdfBlob = await capturePdfBlob();
+          } catch(captureErr) {
+            console.warn('PDF capture failed (non-blocking):', captureErr.message);
+          }
+
+          if (pdfBlob) {
+            // Step 2b: Upload PDF blob to Worker
+            const safeName = (name || 'Report').replace(/[^a-zA-Z0-9 ]/g,'').trim().replace(/ +/g,'_');
+            const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
+            const filename = 'MyDISC_GeneratedOutput_' + safeName + '_' + today + '.pdf';
+
+            const formData = new FormData();
+            formData.append('pdf', pdfBlob, filename);
+            formData.append('metadata', JSON.stringify(workerPayload));
+
+            const uploadRes = await fetch(WORKER_URL + '/upload', {
+              method: 'POST',
+              body: formData,
+            });
+            const uploadData = await uploadRes.json();
+            if (uploadData.success) {
+              pdfUrl = uploadData.download_url || '';
+              console.log('PDF uploaded, URL:', pdfUrl);
+              // Also send metadata to get report_url
+              try {
+                const metaRes = await fetch(WORKER_URL + '/generate', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(workerPayload),
+                });
+                const metaData = await metaRes.json();
+                if (metaData.success && metaData.report_url) {
+                  pdfUrl = metaData.report_url;
+                }
+              } catch(e) { /* non-blocking */ }
+            }
+          } else {
+            // Send metadata to Worker, get back report_url
+            const workerRes = await fetch(WORKER_URL + '/generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(workerPayload),
+            });
+            const workerData = await workerRes.json();
+            // Use report_url (link back to full report page) as the email link
+            if (workerData.success) {
+              pdfUrl = workerData.report_url || workerData.download_url || '';
+            }
+          }
+        } catch (workerErr) {
+          console.warn('Worker error (non-blocking):', workerErr.message);
         }
-      } catch (workerErr) {
-        console.warn('Worker error (non-blocking):', workerErr.message);
+
+        // Step 3: Send EmailJS with PDF URL (whether we got one or not)
+        if (typeof emailjs !== 'undefined') {
+          emailjs.send('service_dqkidhc', EMAILJS_TEMPLATE_ID, {
+            customer_name:     name,
+            customer_email:    email,
+            customer_company:  org,
+            customer_contact:  phone,
+            respondent_name:   name,
+            primary_style:     RESULTS.adapted.style,
+            work_style:        RESULTS.contexts.work.style,
+            home_style:        RESULTS.contexts.home.style,
+            leader_style:      RESULTS.contexts.leader.style,
+            follower_style:    RESULTS.contexts.follower.style,
+            pressure_style:    RESULTS.contexts.pressure.style,
+            natural_style:     RESULTS.natural.style,
+            energy_drain:      RESULTS.energyDrain + '/100 (' + (RESULTS.energyDrain >= 25 ? 'High' : RESULTS.energyDrain >= 15 ? 'Moderate' : 'Low') + ')',
+            reliability:       RESULTS.reliability,
+            date_completed:    date + ' at ' + time,
+            time_to_complete:  getElapsedTime(),
+            pdf_download_url:  pdfUrl || '',
+          }, EMAILJS_PUBLIC_KEY)
+          .then(() => console.log('EmailJS sent with PDF URL:', pdfUrl))
+          .catch(err => console.warn('EmailJS error (non-blocking):', err));
+        }
+      }, 2000); // 2 second delay to let report render
+    } else {
+      // No worker, just send email without PDF
+      if (typeof emailjs !== 'undefined') {
+        emailjs.send('service_dqkidhc', EMAILJS_TEMPLATE_ID, {
+          customer_name:    name, customer_email: email,
+          customer_company: org,  customer_contact: phone,
+          respondent_name:  name,
+          primary_style:    RESULTS.adapted.style,
+          pdf_download_url: '',
+        }, EMAILJS_PUBLIC_KEY).catch(err => console.warn('EmailJS:', err));
       }
     }
-
-    // Step 2: Send EmailJS with PDF URL included
-    btn.textContent = 'Sending confirmation...';
-    if (typeof emailjs !== 'undefined') {
-      emailjs.send('service_dqkidhc', EMAILJS_TEMPLATE_ID, {
-        customer_name:     name,
-        customer_email:    email,
-        customer_company:  org,
-        customer_contact:  phone,
-        respondent_name:   name,
-        primary_style:     RESULTS.adapted.style,
-        work_style:        RESULTS.contexts.work.style,
-        home_style:        RESULTS.contexts.home.style,
-        leader_style:      RESULTS.contexts.leader.style,
-        follower_style:    RESULTS.contexts.follower.style,
-        pressure_style:    RESULTS.contexts.pressure.style,
-        natural_style:     RESULTS.natural.style,
-        energy_drain:      RESULTS.energyDrain + '/100 (' + (RESULTS.energyDrain >= 25 ? 'High' : RESULTS.energyDrain >= 15 ? 'Moderate' : 'Low') + ')',
-        reliability:       RESULTS.reliability,
-        date_completed:    date + ' at ' + time,
-        time_to_complete:  getElapsedTime(),
-        pdf_download_url:  pdfUrl || '',
-      }, EMAILJS_PUBLIC_KEY)
-      .then(() => console.log('Lead captured via EmailJS'))
-      .catch(err => console.warn('EmailJS error (non-blocking):', err));
-    }
-
-    // Step 3: Show report (always — never blocked by Worker or email failure)
-    show('report');
-    if (!WORKER_ACTIVE) {
-      buildReport(RESULTS);
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   runAll();
+}
+
+// ── PDF blob capture using jsPDF + html2canvas ───────────────────────────
+async function capturePdfBlob() {
+  // Dynamically load jsPDF and html2canvas
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+
+  const { jsPDF } = window.jspdf;
+  const container = document.getElementById('report-container');
+  if (!container) throw new Error('Report container not found');
+
+  // Hide the sticky PDF bar and print-only elements during capture
+  const pdfBar = document.getElementById('pdf-sticky-bar');
+  if (pdfBar) pdfBar.style.display = 'none';
+
+  try {
+    const canvas = await html2canvas(container, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      windowWidth: 900,
+    });
+
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW  = pdf.internal.pageSize.getWidth();
+    const pageH  = pdf.internal.pageSize.getHeight();
+    const margin = 10;
+    const usableW = pageW - margin * 2;
+    const imgW   = canvas.width;
+    const imgH   = canvas.height;
+    const ratio  = usableW / imgW;
+    const scaledH = imgH * ratio;
+    const pagesNeeded = Math.ceil(scaledH / (pageH - margin * 2));
+
+    for (let page = 0; page < pagesNeeded; page++) {
+      if (page > 0) pdf.addPage();
+      const srcY   = page * (pageH - margin * 2) / ratio;
+      const srcH   = Math.min((pageH - margin * 2) / ratio, imgH - srcY);
+      const sliceCanvas = document.createElement('canvas');
+      sliceCanvas.width  = imgW;
+      sliceCanvas.height = srcH;
+      const ctx = sliceCanvas.getContext('2d');
+      ctx.drawImage(canvas, 0, srcY, imgW, srcH, 0, 0, imgW, srcH);
+      const sliceData = sliceCanvas.toDataURL('image/jpeg', 0.92);
+      pdf.addImage(sliceData, 'JPEG', margin, margin, usableW, srcH * ratio);
+    }
+
+    const pdfBlob = pdf.output('blob');
+    return pdfBlob;
+  } finally {
+    if (pdfBar) pdfBar.style.display = '';
+  }
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1472,15 +1619,15 @@ function submitGate() {
 const NARRATIVE = {
   D: {
     label: 'Dominance',
-    core_identity: `You are a person who leads with will. At your core, you are driven by the need to achieve results, maintain control over outcomes, and leave a visible mark on everything you touch. Your internal narrative sounds something like this: "If I want something done properly, I need to own it. Waiting for others slows everything down." This is not arrogance, it is a deeply held belief that speed and decisiveness are virtues, and that hesitation is a form of failure.\n\nYou process the world through the lens of outcomes. When something happens, your first question is not "how does this affect people?" but "what needs to happen next?" You are a natural problem-identifier and solution-driver, which makes you invaluable in crisis situations and frustrating in environments that require extended deliberation.\n\nPeople experience you as confident, often before you say a single word. You carry a directional energy that others feel, it either draws them toward you or puts them on guard. You rarely notice the effect you have walking into a room, because from your perspective you are simply being yourself.`,
+    core_identity: `You lead with will. Not the performance of confidence, but the real thing: a settled internal conviction that problems exist to be solved, that pace is a virtue, and that the clearest path forward is usually visible if someone is willing to commit to it. Your internal narrator sounds something like this: "If I want it done properly, I need to own it. Waiting for others slows everything down." This is not arrogance. It is a deeply held operational philosophy that has probably served you well more times than it has cost you.\n\nYou process the world through outcomes. When something happens, your first instinct is not "how is everyone feeling?" but "what needs to happen next and who owns it?" You are a natural problem-identifier and a fast, decisive solution-driver. In a crisis or a high-velocity environment, you are exactly the person the room needs. In a context that rewards patience and consensus-building, you are a source of friction that others find difficult to name or address directly.\n\nPeople experience you as direct before they experience you as warm. You communicate conclusions without preamble and expect others to keep pace. You rarely soften a message because from your perspective, softening is a form of distortion that delays the outcome. This serves you well in high-stakes situations. It costs you in relationships that require more sustained attention than you instinctively give them.`,
     thinking: `You are a top-down thinker. You start with the outcome and work backward. Where others might explore every option before choosing a direction, you select a direction first and then stress-test it. This gives you extraordinary speed, but it also means you can become attached to your initial framing and resistant to information that challenges it.\n\nYour processing speed is high for decisions and low for feelings. You absorb facts quickly and act on them. You find it harder to slow down for emotional data, not because you do not have emotions, but because in your hierarchy of information, feelings rank below results.`,
     decision_making: `You make decisions fast. In most cases, this is a genuine strength, environments that require rapid judgment benefit enormously from your willingness to commit. Your decisions are typically anchored in a clear sense of what you want to achieve, and you are willing to be wrong in order to keep moving.\n\nThe risk is that your speed can outpace your information. You may commit to a course of action before quieter voices in the room have had a chance to raise legitimate concerns. You often interpret hesitation from others as indecisiveness, when it may actually be good judgment surfacing at a pace that does not match yours.\n\nUnder normal conditions, you make good decisions. Under time pressure, you make faster decisions, not always better ones.`,
     strengths_detail: `Your directness is a genuine gift in a world where most people soften their messages to the point of obscuring them. When you say something clearly needs to change, it is heard. When you commit to delivering a result, people believe you. When situations become chaotic, you provide the clarity others are waiting for.\n\nYou are also a natural accountability owner. You do not deflect blame or wait for circumstances to improve on their own. This makes you disproportionately valuable in turnaround situations, new initiatives, and any context where someone needs to take responsibility and act.\n\nYour competitive instinct, when channelled productively, raises the standard of everyone around you. Teams with a strong D leader often achieve more than they believed they were capable of, because someone consistently held the bar higher than they would have set it for themselves.`,
     motivators_detail: `You come alive when results are visible and attributable to you. Generic team credit satisfies you less than knowing exactly what your contribution produced. You need challenges that feel meaningful, not because they are easy, but because they were genuinely difficult and you prevailed anyway.\n\nAutonomy is not a preference for you, it is a functional requirement. When you are free to decide how to reach a goal, your energy is high and your output reflects it. When you are told not just what to achieve but precisely how to achieve it, something in you shuts down. You can comply with instructions, but you cannot perform your best while doing so.\n\nCompetition, against others, against your own previous performance, against a difficult standard, is fuel. You may not always name it as such, but a goal without stakes does not fully engage you.`,
     demotivators_detail: `Bureaucracy drains you more than almost anything. Processes that exist for their own sake, decisions that require three levels of approval, meetings that produce documentation rather than action, these are not merely inconvenient for you, they feel genuinely wrong. You experience them as organisational cowardice: a system designed to avoid accountability rather than produce results.\n\nBeing micromanaged is deeply demoralising. It signals that someone does not trust your judgment, which you experience as a fundamental challenge to your competence. Even when the micromanagement is well-intentioned, you struggle to perform well under it.\n\nWorking with people who consistently avoid decisions quietly exhausts you. You can adapt your communication style, but you cannot manufacture patience for indecision over an extended period.`,
     communication_style: `You communicate with economy. You lead with conclusions, not context. In a meeting, you are the person who gets to the point before others have finished framing the question. This is efficient, but it can leave people feeling that their perspective was not heard even when you did listen.\n\nYour feedback is direct, sometimes more direct than the recipient is prepared for. You consider softening a message to be a form of dishonesty, which means you often deliver hard truths without enough scaffolding for the other person to receive them well.\n\nYou listen most actively when information is being presented efficiently and with clear relevance to a decision. When conversation meanders, your attention wanders. People can tell.`,
-    stress_arc: `At mild pressure: increased focus, higher pace, shorter communication. You move from collaborative to directive. People around you notice the gear change but can still operate with you.\n\nAt moderate pressure: less consultation, more override. You begin making calls that affect others without fully involving them. You become visibly impatient. S and C styles in particular start to disengage because the environment feels unsafe for disagreement.\n\nAt severe pressure: the compliance trap activates. You become so forceful in your direction that people stop pushing back altogether. You may interpret the silence as alignment. It is not. People are complying to avoid conflict, not because they agree. Decisions made in this state often need revisiting once the pressure passes.`,
-    blind_spots: `Your impatience with pace is perhaps your most costly blind spot. You genuinely experience a slower person as a less capable person, but this is a projection. An S-style colleague who takes three days to think through a decision may be doing more rigorous analysis than you completed in three minutes. Speed of decision does not equal quality of decision.\n\nYour relationship with vulnerability is limited. You can project strength in almost any situation, which is valuable, but it also means you receive very little honest feedback. The people around you learn early that challenging you is costly. Over time, you lose access to the information you most need.\n\nYour tendency to solve rather than listen means that people who come to you with problems often leave feeling managed rather than heard. This is not your intention, but it is frequently your impact.`,
+    stress_arc: `At mild pressure: increased focus, higher pace, shorter communication. You move from collaborative to directive. People around you notice the gear change but can mostly still operate with you.\n\nAt moderate pressure: consultation stops and override begins. You make calls that affect others without fully involving them. Visible impatience replaces patience. You begin making calls that affect others without fully involving them. You become visibly impatient. S and C styles in particular start to disengage because the environment no longer feels safe for honest disagreement.\n\nAt severe pressure: the compliance trap activates. You become so forceful that people stop pushing back entirely. You read the silence as alignment. It is not. People are complying to avoid conflict, not because they agree. Decisions made in this state tend to need revisiting once the pressure passes, often at significant cost.`,
+    blind_spots: `Your impatience with pace is your most costly recurring blind spot. You instinctively experience a slower person as a less capable person. This is a projection, not an assessment. An S-style colleague who takes three days to think through a decision is frequently doing more rigorous analysis than you completed in three minutes. The quality of your decisions is not determined by their speed.\n\nYour relationship with vulnerability is almost non-existent professionally. You can project strength in virtually any situation, which is genuinely valuable in leadership contexts. The cost is that you receive very little honest feedback. The people around you learn early that challenging you requires more effort than most are willing to invest. Over time, you lose access to the information that would most improve your decision-making.\n\nYour tendency to solve before you listen means that people who come to you with problems often leave feeling managed rather than understood. This is almost never your intention. It is very frequently your impact. The practical consequence is that people stop bringing you the early-stage, ambiguous problems that most need good thinking. You only hear about things once they are already serious.`,
     ideal_environment: `You perform best in environments where authority is clear, targets are ambitious, and the distance between decision and action is short. You thrive in leadership roles, commercial functions, and crisis-response contexts where your directness is read as decisiveness rather than aggression.\n\nYou struggle in highly consensus-driven environments, creative roles that require extended ambiguity, and cultures that reward process compliance over results. The most dangerous environment for you is one where the formal authority and the actual power are misaligned, where you must follow someone whose judgment you do not respect.`,
     growth_trajectory: `Early in your career, your D style is an asset that gets you noticed quickly. You deliver, you lead naturally, and you advance. The first major inflection typically comes when you are promoted into a role that requires you to achieve results through people rather than directly. Pure D energy that worked brilliantly as an individual contributor begins to create friction in management, because now the people who slow you down are not obstacles, they are your team.\n\nThe second inflection comes when you discover that the environments you have created, through force of personality, have a ceiling. People perform when you are present, but not when you are not. The organisation you built is dependent on you, not resilient without you. The growth move at this stage is learning to build psychological safety without sacrificing standards.\n\nMature D leaders are among the most powerful forces in any organisation. They combine the decisiveness that made them effective early on with the relational intelligence that allows others to perform alongside them rather than beneath them.`,
     thirty_day: `For the next 30 days, practise the two-question rule: before giving your answer or your solution in any substantive conversation, ask two genuine questions first and listen fully to both answers before you respond.\n\nThis will feel inefficient. That discomfort is exactly the point. What you will notice within two weeks is that your solutions improve, because you are incorporating information you previously missed. What you will notice within a month is that the people around you engage differently with you. They bring you more, earlier, because they no longer expect to be overridden.\n\nMeasure success by one thing: how many times this month did someone tell you something that changed your mind?`,
@@ -1497,8 +1644,8 @@ const NARRATIVE = {
     motivators_detail: `You are energised by recognition, not just praise, but being seen and valued by people whose opinion matters to you. A genuine acknowledgement from a respected person sustains you more than most external rewards. The absence of recognition, conversely, is demoralising out of proportion to its apparent significance.\n\nVariety and social interaction are functional requirements, not preferences. Extended periods of solitary work, repetitive tasks, or environments with limited human interaction quietly deplete you. You may not name this as the problem when you are disengaged, but it almost always is.\n\nNew opportunities excite you genuinely. The beginning of a project, a new client, a fresh initiative, these are energising not just because of the potential outcome but because of the possibility they represent. The challenge is that the middle and end of projects, where novelty has worn off and execution is required, feel much less alive.`,
     demotivators_detail: `Isolation is your most consistent demotivator. You can tolerate almost any other adverse condition, a difficult manager, a challenging project, a frustrating process, as long as you have meaningful human connection around you. Remove that, and your performance declines rapidly.\n\nBeing ignored or excluded is deeply uncomfortable, to a degree that can surprise even you. When your ideas are overlooked without acknowledgement, when you are left out of conversations that affect you, or when feedback suggests that people do not value your contribution, these experiences land harder for you than they would for other styles.\n\nRigid systems and heavy process management kill your energy. You need enough freedom to be yourself, to bring your personality, your spontaneity and your relational approach to the work. Environments that require strict protocol adherence, where personality must be suppressed in favour of procedure, gradually extinguish what makes you most effective.`,
     communication_style: `You communicate through stories, enthusiasm and personal connection. You use more words than other styles, and more expressive language. Your emails are warmer than most, your presentations more narrative, your conversations more exploratory. People leave interactions with you feeling energised, even when very little of substance was decided.\n\nYour listening has a particular quality: you listen for feelings and connection more than for content. This makes you excellent at understanding how someone is experiencing a situation, and less reliable at capturing technical detail or logical argument.\n\nThe risk in your communication style is that you say yes before you have thought through the implications. You agree in the moment because agreement feels good and disagreement creates social friction that you genuinely dislike. This leads to overcommitment, and overcommitment leads to follow-through failures that are among your most consistent blind spots.`,
-    stress_arc: `At mild pressure: you talk more. Your energy level rises before it falls, and you attempt to solve problems by creating enthusiasm around them. This can be genuinely helpful in the early stages of a crisis.\n\nAt moderate pressure: you become scattered. You jump between conversations, take on too much, reassure people in ways that are not grounded in reality, and begin to avoid the people who are making you feel inadequate. Your social intelligence becomes selectively deployed, you lean into easy relationships and avoid difficult ones.\n\nAt severe pressure: you may overpromise significantly, blame external circumstances for failures, and seek reassurance from your network rather than facing the problem directly. The emotional energy required to maintain your positive presentation becomes unsustainable, and you can crash hard once the performance is no longer possible.`,
-    blind_spots: `Your follow-through gap is your most consistent blind spot. You initiate brilliantly and sustain poorly. The gap between what you commit to and what you deliver is not caused by bad intentions, you genuinely believe every commitment when you make it. It is caused by the fact that your energy is highest at the beginning of things and lowest at the end, which is precisely the inverse of what reliable delivery requires.\n\nYour discomfort with difficult conversations means that problems you should address early often go unaddressed until they are significantly worse. You tend to optimise for harmony in the short term, which creates much larger disharmony in the medium term.\n\nYou may overestimate your influence. Your natural ability to create positive energy can lead you to believe you have more buy-in than you actually do. People enjoy your presence without necessarily committing to your direction.`,
+    stress_arc: `At mild pressure: you talk more. Your energy rises before it falls, and you attempt to solve problems by generating enthusiasm around them. In the early stages of a difficulty, this is genuinely useful. People need someone who believes things can be fixed.\n\nAt moderate pressure: you fragment. You jump between conversations, take on commitments you cannot service, give reassurances that are not grounded in reality, and begin quietly avoiding the people asking the hard questions. Your social intelligence becomes selectively deployed: you lean toward those who make you feel capable and away from those who need honest answers.\n\nAt severe pressure: the performance becomes unsustainable. Overpromising accelerates. Blame moves outward toward circumstances and other people. You seek reassurance from your network rather than confronting the problem directly. When the positive presentation finally collapses, it collapses hard. Everyone sees the gap between what was projected and what actually existed, all at once.`,
+    blind_spots: `Your follow-through gap is your most persistent liability. You initiate with genuine energy and sustain poorly. The distance between what you commit to and what you deliver is not caused by dishonesty. You believe every commitment at the moment you make it. The problem is structural: your energy peaks at beginnings and drops at the execution stage, which is the precise inverse of what reliable delivery requires. People eventually learn to discount your enthusiasm when calculating whether something will actually happen.\n\nYour discomfort with necessary confrontation means that problems you should address at a level two become problems you address at a level eight. The avoidance feels like kindness in the moment. It is actually a form of delayed harm that is more expensive than the original issue would have been.\n\nYou are systematically overestimating your influence in certain contexts. Your ability to create warmth and positive energy leads you to read a room as more aligned than it actually is. People enjoy your presence without necessarily committing to your direction. The applause is real. The follow-through from others is not always what you believe it to be.`,
     ideal_environment: `You perform best in environments that are social, varied, and oriented around people outcomes. Sales, client services, HR, culture-building, creative roles, facilitation, training, these are your natural home. You also perform well in early-stage teams where energy and vision matter more than process and precision.\n\nYou struggle in roles that require sustained independent work, heavy data analysis, strict compliance, or regular delivery of uncomfortable truths. The most dangerous environment for you is one where your social skills are irrelevant to performance, where only technical output matters and relationships have no weight.`,
     growth_trajectory: `Early in your career, your i style generates rapid relationships, high visibility and a reputation for positive energy. You are often the person who makes a team enjoyable, who brings clients back, who gets chosen for visible projects. The first major inflection comes when you are expected to deliver sustained results without the novelty and social energy of a new context. Execution discipline, which does not come naturally to you, becomes the key challenge.\n\nThe second inflection comes when your relational approach begins to be read as a lack of substance. You may find that people enjoy working with you but do not respect your judgment as fully as you believe they do. The growth move here is developing credibility through consistent follow-through.\n\nMature i-style leaders are among the most inspiring forces in any organisation. They have learned to channel their natural energy into genuine commitment, and their teams achieve things they would never have attempted without the belief that only an i-style leader can generate.`,
     thirty_day: `For the next 30 days, practise the closed-loop commitment: every time you agree to do something, write it down immediately, and at the end of every day review your list and close every open loop before it carries to the next day.\n\nThis will feel like administration. That resistance is the point. What you will discover within two weeks is that your credibility rises noticeably, people begin to experience you as someone who does what they say. What you will notice within a month is that your stress level drops, because unresolved commitments accumulate as background anxiety even when you are not consciously tracking them.\n\nMeasure success by one thing: at the end of 30 days, how many open commitments do you have outstanding?`,
@@ -1516,7 +1663,7 @@ const NARRATIVE = {
     demotivators_detail: `Conflict is more than uncomfortable for you, it is actively depleting. You can handle disagreement when it is conducted with care and respect, but environments characterised by aggression, interpersonal competition or sustained tension drain your energy at a rate other styles do not fully appreciate. You may appear fine on the surface long after you have stopped being fine beneath it.\n\nSudden, unexplained change is one of your most reliable demotivators. It is not change itself that is the problem, it is change without context, warning or acknowledgement of its impact. When leaders implement change without explanation or consultation, you experience it as a signal that your stability is not valued and your concerns will not be heard.\n\nBeing taken for granted is a slow and silent demotivator. Because you rarely complain, rarely push back and rarely make demands, it is easy for the people around you to assume that everything is fine. Often it is not. Your quiet accommodation of difficult situations has a limit, and when you reach it, you disengage, not dramatically, but permanently.`,
     communication_style: `You communicate with care and diplomacy. You choose your words deliberately, considering their impact before you deliver them. This makes you an excellent communicator in sensitive situations, a performance conversation, a difficult team dynamic, a moment that requires both honesty and compassion.\n\nYour listening is deep and patient. You listen to understand, not to respond. People feel genuinely heard by you, often without you saying anything at all.\n\nThe risk in your communication style is that you soften messages to the point where they lose their intended effect. You may deliver feedback so diplomatically that the recipient walks away without a clear understanding that something needs to change. Your kindness, in these moments, is not serving them.`,
     stress_arc: `At mild pressure: you work harder and complain less. You absorb the additional load without signalling distress. People around you may not realise you are under pressure because you continue to function smoothly.\n\nAt moderate pressure: you become increasingly accommodating at the expense of your own needs. You take on others' problems to avoid their discomfort. You defer to others' preferences even when they conflict with your own. The word "fine" becomes a default response to questions about how you are doing, regardless of the truth.\n\nAt severe pressure: you experience a form of quiet shutdown. Your engagement drops, your initiative disappears, and you begin doing the minimum necessary to fulfil your obligations. This can be mistaken for disengagement or a change in commitment. It is neither. It is the result of sustained, unacknowledged strain that has finally reached its limit.`,
-    blind_spots: `Your tendency to avoid difficult conversations is your most costly blind spot. You allow problems to persist because addressing them creates discomfort, for the other person, for the relationship, and for you. By the time you finally raise the issue, it has often grown to a size that is much harder to resolve than it would have been originally.\n\nYour indirectness can create misunderstanding. You often communicate your real position through implication, tone and pauses rather than explicit statement. This works well with other S-styles, who pick up these signals, and poorly with D-styles, who may not register them at all.\n\nYou underestimate your own influence and authority. Because you do not seek visibility or control, you may not realise how much others look to you for stability and direction. Your opinion matters more than you think, and your silence is often interpreted as acquiescence when it is actually thoughtful observation.`,
+    blind_spots: `Your tendency to avoid necessary confrontation is your most costly blind spot. You allow problems to persist because raising them creates discomfort: for the other person, for the relationship, and most of all for you. By the time you finally surface an issue, it has typically grown to a size that is significantly harder to resolve than the original version would have been. The kindness of avoidance is not kindness. It is a deferral of pain that compounds with interest.\n\nYour indirectness creates systematic misunderstanding. You communicate your real position through implication, tone and pauses rather than explicit statement. Other S-styles pick up these signals reliably. D-styles do not register them at all. The result is that your actual view on important matters is frequently absent from the decisions being made, even when you believe you have communicated it.\n\nYou underestimate your own influence significantly. Because you do not seek visibility or control, you do not see how much others look to you for stability. Your opinion carries more weight than you assign to it. When you stay quiet, the room hears consent. The positions you hold privately but do not voice cannot be factored into decisions that would benefit from them.`,
     ideal_environment: `You perform best in environments that are stable, cooperative and oriented around people and sustained delivery. HR, operations, customer care, project management, education, healthcare, counselling, team leadership, any context where showing up consistently and caring genuinely about people is at the core of the role.\n\nYou struggle in highly competitive environments, roles that require regular confrontation, constant change without stability, or contexts where your considered pace is experienced as a liability rather than an asset. The most difficult environment for you is one where trust has broken down and the culture is primarily political.`,
     growth_trajectory: `Early in your career, your S style generates deep loyalty and a reputation for reliability. You are the person people trust, the team member who always comes through, the colleague everyone wants on their project. The first major inflection comes when the roles you are given require you to create change, set boundaries, or make decisions that will disappoint people. The ability to tolerate the discomfort of necessary conflict becomes the defining developmental challenge.\n\nThe second inflection comes when your value is so assumed that it stops being acknowledged. You may find that you are taken for granted by managers who give their attention to more vocal colleagues. The growth move here is learning to advocate for yourself, not aggressively, but consistently and clearly.\n\nMature S-style leaders create cultures that other styles cannot. Their teams are characterised by genuine psychological safety, deep loyalty and the kind of sustained excellence that comes from people who feel genuinely cared for. They are often underestimated until they are absent, at which point the cost of what they provided becomes suddenly, starkly clear.`,
     thirty_day: `For the next 30 days, practise the one honest statement per day: identify one situation each day where your genuine view differs from what you actually say, and choose to say what you actually think, clearly, respectfully, and without excessive qualification.\n\nThis will feel uncomfortable. The discomfort is the development. What you will notice within two weeks is that your interactions become more authentic and less effortful, because you are no longer carrying the weight of the unsaid. What you will notice within a month is that the people you were most afraid to disappoint handle your honesty far better than you anticipated.\n\nMeasure success by one thing: how many times this month did you say what you actually meant when it mattered?`,
@@ -1534,7 +1681,7 @@ const NARRATIVE = {
     demotivators_detail: `Being expected to produce work that does not meet your standards is quietly demoralising in a way that other styles may not fully appreciate. It is not just that you dislike poor quality, it genuinely conflicts with your sense of professional identity. Being asked to rush something, to accept a shortcut, or to let an error slide to meet a deadline can leave you feeling that your integrity has been compromised.\n\nPublic criticism is particularly difficult for you. You are already your own most demanding critic, and external criticism, especially in front of others, can trigger a defensive response that is more intense than you intend to show. You do not experience criticism as information; you experience it as an accusation, at least initially.\n\nEmotional displays and irrational decisions in the people around you drain your energy significantly. You find it difficult to operate effectively in environments characterised by frequent emotional volatility, where decisions are made on feeling rather than evidence and where quality standards fluctuate based on mood.`,
     communication_style: `You communicate with precision and economy. Your written communication is clear, well-structured and carefully considered. Your verbal communication is measured, you think before you speak, which means your contributions in meetings are fewer, more considered and more accurate than most.\n\nYou listen analytically. You track logical consistency, factual accuracy and internal coherence in what you hear. You are the person in the room who notices when a statement contradicts something said earlier, or when a claim is made without adequate supporting evidence.\n\nThe risk in your communication style is that your precision can feel cold, and your economy can feel dismissive. You are not unfriendly, you are focused. But to styles that read warmth as a signal of respect, your delivery can feel like a signal of indifference or superiority, even when it is neither.`,
     stress_arc: `At mild pressure: you double down on rigour. Your quality standards rise, your working pace slows slightly, and you become more thorough rather than more efficient. This can improve output quality, but it can also extend timelines in ways that create downstream pressure for others.\n\nAt moderate pressure: you become increasingly critical of others' work and decreasingly tolerant of what you perceive as carelessness or shortcuts. You may withdraw from collaboration and prefer to do things yourself rather than trust others to meet your standards. Your communications become more clipped and less warm.\n\nAt severe pressure: you can enter a state of analytical paralysis, where the fear of making an error in a high-stakes situation makes it genuinely difficult to make any decision at all. You may also become severely self-critical in ways that are not proportionate to the actual situation, holding yourself to standards of certainty and correctness that are impossible in the circumstances.`,
-    blind_spots: `Your relationship with imperfection is your most limiting blind spot. You can hold yourself and others to standards that are, in practice, unachievable, and then respond to the gap between standard and reality with frustration rather than adjustment. The question is not whether imperfection is acceptable, but whether the cost of eliminating it is proportionate to the benefit.\n\nYour tendency to work independently means you frequently produce excellent work that would have been better with input from others, but which you did not share until it was complete, by which point changing it felt like criticism of the effort you had already invested.\n\nYou may underestimate the relational cost of your standards. Colleagues who consistently feel that their work is inadequate in your eyes will eventually stop bringing things to you. The quality of information you receive, and the collaboration you are offered, will diminish as a result.`,
+    blind_spots: `Your relationship with imperfection is your most limiting constraint. You can hold yourself and others to standards that are functionally unachievable, and when reality fails to meet those standards, your response is frustration rather than recalibration. The question is never whether excellence matters. It does. The question is whether the cost of pursuing the last five percent of perfection is proportionate to its value. For you, the honest answer is often no, but the instinct to pursue it anyway is very strong.\n\nYour preference for independent work means you frequently produce excellent output that would have been better with earlier input from others, but which you did not share until it was complete. By that point, changing it feels like criticism of the effort already invested, so you resist it, and others stop offering it. This creates a closed loop that produces technically sound work that is less calibrated to what the organisation actually needs.\n\nYou may be underestimating the relational cost of your standards. Colleagues who repeatedly feel that their contribution is insufficient in your eyes will eventually stop bringing you their thinking. The quality of information you receive and the range of collaboration you are offered will quietly contract. You will not always know why. The work you see will be the work people believe will meet your bar, which is a smaller and less interesting set than what is actually available.`,
     ideal_environment: `You perform best in environments where accuracy matters, where expertise is valued, and where you are given the time and space to do your work properly. Finance, legal, engineering, data science, research, compliance, quality assurance, systems design, any context where the cost of error is high and the value of rigour is recognised.\n\nYou struggle in high-speed, high-ambiguity environments where decisions must be made on incomplete information, in cultures that value energy and personality over substance and accuracy, and in roles that require frequent public performance, emotional expressiveness or the management of volatile interpersonal dynamics.`,
     growth_trajectory: `Early in your career, your C style generates a reputation for accuracy, reliability and depth of knowledge. You are the person whose work does not need to be checked, whose analysis can be trusted, whose recommendation carries weight. The first major inflection comes when you are promoted into roles that require you to influence others, deliver difficult messages or lead teams with styles very different from your own. The ability to communicate your expertise without seeming condescending, and to hold standards without seeming rigid, becomes the defining challenge.\n\nThe second inflection comes when the pace required by your organisation exceeds the pace at which you can produce work at your preferred standard. The ability to make good-enough decisions quickly, and to release work before it is perfect, becomes a genuine professional necessity.\n\nMature C-style leaders are among the most trustworthy in any organisation. Their teams develop a culture of genuine quality, where doing things right is not a bureaucratic requirement but a shared value that everyone has internalised because they have seen what it produces over time.`,
     thirty_day: `For the next 30 days, practise the 70 percent rule: identify one decision or piece of work each day that you are holding back because it is not yet perfect, and release it when it reaches 70 percent of your standard, with a brief note explaining what you would improve given more time.\n\nThis will feel like lowering your standards. It is not. It is calibrating your standards to the value of speed in context. What you will discover within two weeks is that most of your 70 percent work is received as excellent by others, because your 70 percent is most people's 90 percent. What you will notice within a month is that your relationships improve, because people feel more included in your process and less judged by your standards.\n\nMeasure success by one thing: how many times this month did you deliver something before it was finished rather than after?`,
@@ -1606,6 +1753,434 @@ function compatCard(style, color, text) {
   </div>`;
 }
 
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// EXTENDED BLEND MODIFIERS, remaining sections
+// ══════════════════════════════════════════════════════════════════════
+const BLEND_EXTENDED = {
+
+  'Di': {
+    core_add:        `Your secondary Influence means your Dominance comes with social electricity. You do not just push for results, you rally people toward them. This makes you more persuasive than a pure D, more charismatic, and more aware of how your energy lands on others. The risk is that the performance can outpace the plan.`,
+    strengths_add:   `Your Di combination gives you an unusually powerful ability to open doors and close deals. Where a pure D might push people into compliance, you bring them along willingly. This makes you effective in commercial, leadership and culture-setting roles that require both drive and influence.`,
+    communication_add: `Your Di blend means you lead with energy and confidence simultaneously. You communicate big ideas persuasively, and people feel the momentum in your delivery. The watch point is that you can oversell, your enthusiasm outpaces the evidence, and commitments get made before the detail is solid.`,
+    conflict_add:    `In conflict, your Di blend means you go in hard but with charm. You push your position assertively but wrap it in enough social warmth that people do not always register how forceful you are being. This is effective short-term and relationship-damaging long-term if the pattern becomes visible.`,
+    environment_add: `You thrive in high-visibility, high-stakes environments where results and relationships both matter. Sales leadership, client-facing strategy, entrepreneurial ventures and culture-building roles play to both sides of your Di blend.`,
+    growth_add:      `Your growth path requires you to convert your natural influence into sustained accountability. The Di pattern is exceptionally good at starting things and less reliable at finishing them. Mature Di leaders build systems around their blind spots, tracking commitments, delegating follow-through, and measuring outcomes rather than just energy.`,
+    thirty_day_add:  `For the next 30 days, track every commitment you make in writing and review it at the end of each week. Note how many you completed, how many you carried over, and how many you quietly let go. The pattern will be uncomfortable and instructive.`,
+  },
+
+  'DS': {
+    core_add:        `Your secondary Steadiness means you carry a genuine concern for the people around you into every results-driven situation. You want to win, but not at the cost of the team. This makes you a steadier, more sustainable version of Dominance, effective over a longer horizon than a pure D.`,
+    strengths_add:   `Your DS blend makes you a particularly effective team leader. You hold high standards without creating the fear that a pure D can produce, and you build loyalty through consistency rather than just through results. Teams under DS leaders often over-perform relative to expectations because people feel both challenged and supported.`,
+    communication_add: `You communicate with directness but not with the edge that a pure D can carry. You check in before you move on. You give context. You make sure people are ready before you push. This makes you more effective at managing upward and across than a pure D, because people do not feel run over by you.`,
+    conflict_add:    `In conflict, your DS blend means you will push for your position but you will pull back if the relationship is showing strain. This creates situations where you have not fully resolved the issue because you softened the close to protect the connection. Name this pattern: it is a form of false harmony.`,
+    environment_add: `You perform best in environments with clear accountability and genuine team culture. You need both, a context where results matter and where the people producing them are respected. Pure process environments or pure hustle cultures both underuse your blend.`,
+    growth_add:      `Your DS growth challenge is learning when to prioritise the outcome over the relationship. You have the instinct to protect both, which is admirable, but there will be moments when a necessary decision will cost you a relationship in the short term. The question is whether you can make that call cleanly.`,
+    thirty_day_add:  `Identify one decision you have been delaying because of its relational cost. Make it this week. Notice what actually happens to the relationship and compare that to what you feared would happen.`,
+  },
+
+  'DC': {
+    core_add:        `Your secondary Conscientiousness means your Dominance is backed by rigour. You do not just push for outcomes, you care whether the outcomes are correct. This makes you one of the most strategically credible profiles in any organisation: decisive, but not reckless.`,
+    strengths_add:   `Your DC combination is particularly powerful in strategic and leadership roles that require both speed of judgment and quality of decision. You hold yourself to high standards and you produce results that can be defended. This gives you an unusual combination of authority and credibility.`,
+    communication_add: `You communicate with precision and directness simultaneously. Your messages are clear, logically structured and delivered without softening. This is highly efficient and can feel cold or dismissive to styles that need more warmth before they can receive information.`,
+    conflict_add:    `In conflict, your DC blend means you argue from both strength and evidence. You push hard and you are usually well-prepared. The risk is that you make it very difficult for the other person to win, which means they eventually stop engaging rather than disagree. You can end up being technically right in an empty room.`,
+    environment_add: `You perform best in high-complexity environments where accuracy and outcomes both matter, strategy, commercial leadership, systems design, investment or senior management roles where the cost of being wrong is high and the reward for being right is significant.`,
+    growth_add:      `Your DC growth edge is learning to allow imperfection in others without making them feel inadequate. Your combination of drive and standards creates an environment where only the very best performers feel comfortable, which caps the scale of what you can build through other people.`,
+    thirty_day_add:  `Choose one piece of work produced by a team member that meets the standard but not your ideal. Approve it without revision. Notice the outcome. Do this three times and compare results to your prediction.`,
+  },
+
+  'iD': {
+    core_add:        `Your secondary Dominance means your Influence comes with genuine ambition. You are not just socially energetic, you want to lead, to win, and to be the one who makes things happen. This makes you bolder than a pure i, more decisive, and more comfortable in high-stakes environments.`,
+    strengths_add:   `Your iD blend makes you a natural leader of people-intensive initiatives. You inspire commitment and then drive execution. Where a pure i might lose momentum after the launch, your D secondary keeps you pushing through the implementation phase. You are effective at keeping teams both energised and accountable.`,
+    communication_add: `You communicate with passion and authority. People feel both inspired and directed by you. The risk is that you can overwhelm, your confidence can close conversations that should stay open, and your pace can leave quieter team members behind.`,
+    conflict_add:    `In conflict, your iD blend means you engage energetically and personally. You push your position with enthusiasm and can find it difficult to separate the disagreement from the relationship. You may escalate faster than you intend to when you feel your ideas are being dismissed.`,
+    environment_add: `You thrive in leadership and commercial roles with high visibility, significant scope and genuine stakes. You need an audience for your work, a goal worth pursuing, and the authority to pursue it your way.`,
+    growth_add:      `Your iD growth challenge is learning that influence is not the same as authority. People can be inspired by you without following your direction. The mature iD leader learns to earn execution, not just attention, and builds systems to convert enthusiasm into measurable results.`,
+    thirty_day_add:  `For the next 30 days, after each presentation or pitch, ask one person in the room: what would make this more credible? Sit with the answer before responding.`,
+  },
+
+  'iS': {
+    core_add:        `Your secondary Steadiness means your Influence is anchored in genuine warmth and loyalty. You do not just connect with people, you stay connected. You remember what matters to them. You show up. This makes your relationships unusually deep for an i profile, and your network unusually loyal.`,
+    strengths_add:   `Your iS blend makes you the person who holds teams together during difficult periods. You bring energy when it is needed and stability when that is needed instead. You read the emotional climate of a group with accuracy and respond to what is actually required rather than what you feel like giving.`,
+    communication_add: `You communicate with warmth, care and patience. People feel genuinely heard by you, not just acknowledged. The risk is that you find it very difficult to deliver hard truths, and you can soften messages to the point where the essential information does not reach the recipient.`,
+    conflict_add:    `In conflict, your iS blend means you work extremely hard to keep both the relationship and the peace intact. You will often absorb more than your share of discomfort to avoid a confrontation. The issues that accumulate from this pattern eventually become larger than the original problem.`,
+    environment_add: `You thrive in people-oriented roles with high relational density, HR, culture building, client services, team leadership, coaching, facilitation. You need environments that value connection, not just output.`,
+    growth_add:      `Your iS growth challenge is developing a tolerance for necessary conflict. You have the social skill to handle difficult conversations, what you need is the belief that the relationship can survive them. It almost always can, and it usually comes out stronger.`,
+    thirty_day_add:  `Identify one conversation you have been avoiding. Write down exactly what you need to say, using one clear sentence. Have the conversation this week. Notice that the relationship survives.`,
+  },
+
+  'iC': {
+    core_add:        `Your secondary Conscientiousness means your Influence comes with a quality filter. You care how things are done, not just that they are done with energy. This makes you more credible than a pure i profile and more careful about the commitments you make and the accuracy of what you communicate.`,
+    strengths_add:   `Your iC blend is particularly effective in communication-intensive roles that also require precision, stakeholder management, proposal writing, structured facilitation, strategic communication. You can make complex things accessible and accurate simultaneously.`,
+    communication_add: `You communicate with warmth and structure. Your messages are both approachable and well-organised. The risk is over-preparation, you rehearse to the point where your delivery loses spontaneity, and you can come across as performing rather than connecting.`,
+    conflict_add:    `In conflict, your iC blend means you want to be liked AND to be right. This creates a pattern where you argue your position carefully and then soften the close when you sense disapproval. You can end up with neither the outcome nor the relationship fully intact.`,
+    environment_add: `You thrive in roles that require you to build bridges between analytical and people-oriented functions, communications, people operations, strategy teams, client engagement, learning and development.`,
+    growth_add:      `Your iC growth edge is learning to act before you feel fully prepared. Your standards and your desire for approval conspire to delay action. The milestone is making a commitment in public before your preparation is complete, and discovering that people respect the attempt more than the polish.`,
+    thirty_day_add:  `Share one idea in a meeting before you have fully developed it. Watch how the group responds. Do this once a week for the month.`,
+  },
+
+  'SD': {
+    core_add:        `Your secondary Dominance means your Steadiness is not passive. When you decide to act, you act decisively. This gives you a quality that pure S profiles often lack: the ability to hold firm when the situation requires it. You are patient by default and resolute when necessary.`,
+    strengths_add:   `Your SD blend makes you a highly effective operational leader. You plan carefully, execute reliably, and can hold a team to account without the abrasiveness that a pure D can produce. People trust you because you are consistent, and they follow you because you are clear.`,
+    communication_add: `You communicate steadily and with conviction when you need to. You choose your words carefully and people pay attention when you speak because you do not speak unnecessarily. The risk is that your threshold for speaking up is too high, you absorb more than you should before you name the issue.`,
+    conflict_add:    `In conflict, your SD blend means you are slower to engage than a D but harder to move once you have taken a position. You think before you push back, but once you push back you are not easily shifted. This can surprise people who expected you to accommodate.`,
+    environment_add: `You thrive in operational leadership, project management and execution-oriented roles where the combination of reliability and accountability produces real results. You need environments that value both consistency and outcomes.`,
+    growth_add:      `Your SD growth challenge is reducing the lag between identifying a problem and acting on it. Your patience is a strength, but it can become a liability when a situation requires speed. Practice intervening earlier, before your internal threshold for action is fully met.`,
+    thirty_day_add:  `This month, each time you notice a problem and your instinct is to wait and see, set a 48-hour decision window instead. Act within it. Track how the outcomes compare to your waiting default.`,
+  },
+
+  'Si': {
+    core_add:        `Your secondary Influence means your Steadiness has warmth and social energy behind it. You are not just patient and reliable, you are genuinely engaging and personable. People are drawn to you because you make them feel both comfortable and included.`,
+    strengths_add:   `Your Si blend makes you exceptionally effective in team cohesion and culture-building roles. You provide stability and you bring people together. You are the person others turn to when the team is fragmented, the atmosphere is tense or someone needs to feel genuinely supported.`,
+    communication_add: `You communicate with warmth and patience. You are an excellent listener and a generous conversational partner. The risk is that your desire to keep things positive can lead you to agree with people more than you actually do, creating misalignments that surface later.`,
+    conflict_add:    `In conflict, your Si blend means you will work hard to keep the relationship warm even when the disagreement is real. You look for common ground, you soften your position to reduce friction, and you often leave the conversation feeling resolved when the underlying issue is not.`,
+    environment_add: `You thrive in collaborative, people-centred environments with genuine team culture. You need roles where relationships matter, where your support of others is visible and valued, and where the pace allows for connection rather than just transaction.`,
+    growth_add:      `Your Si growth challenge is developing comfort with being direct. You have the relationship capital to say hard things, you have built enough trust that people can receive honest input from you. The work is giving yourself permission to use it.`,
+    thirty_day_add:  `Choose one person you work closely with and give them one piece of genuinely useful, direct feedback this month. Not cushioned, not indirect. One clear, specific observation. Notice what happens to the relationship.`,
+  },
+
+  'SC': {
+    core_add:        `Your secondary Conscientiousness means your Steadiness is backed by rigour. You are not just reliable, you are accurate. You bring both consistency and precision to your work, which makes you one of the most dependable profiles in any environment that values quality over speed.`,
+    strengths_add:   `Your SC blend makes you particularly effective in process design, quality assurance, compliance and any role where the work needs to be both consistent and correct. You build systems that last because you care about both the stability of the process and the accuracy of the output.`,
+    communication_add: `You communicate with care and precision. Your written communication is particularly strong, well-structured, accurate and thorough. Verbally, you are measured and considered, which means people trust what you say because you do not say things carelessly.`,
+    conflict_add:    `In conflict, your SC blend means you avoid confrontation and respond to it with careful analysis when forced to engage. You will build a logically sound case and present it quietly. The risk is that by the time you are ready to raise the issue, the window for easy resolution has closed.`,
+    environment_add: `You thrive in structured, quality-oriented environments, finance, operations, compliance, research, systems design, process improvement. You need contexts where accuracy is valued and where your methodical approach is seen as an asset rather than a limitation.`,
+    growth_add:      `Your SC growth challenge is developing tolerance for good enough. Your combination of precision and stability means you can become a bottleneck when speed is required, not through resistance but through thoroughness. The milestone is releasing work before it is perfect and discovering that the world does not end.`,
+    thirty_day_add:  `Set a timer for your next three analytical tasks. When the timer ends, stop and submit. Track the quality of feedback you receive and compare it to your prediction of how imperfect the output was.`,
+  },
+
+  'CD': {
+    core_add:        `Your secondary Dominance means your Conscientiousness is not passive or academic. You apply your precision in pursuit of real outcomes. You do not just analyse, you implement. This makes you one of the most formidable profiles in environments that require both analytical rigour and decisive execution.`,
+    strengths_add:   `Your CD blend makes you exceptionally effective in quality leadership, strategic execution and any role where high standards must produce measurable results. You hold the bar high and you push hard for it. Teams under CD leaders produce work they are genuinely proud of.`,
+    communication_add: `You communicate with authority and precision. Your arguments are well-structured, evidence-based and delivered without equivocation. People take you seriously. The risk is that your communication style leaves no room for uncertainty, which can make others reluctant to surface information that complicates your analysis.`,
+    conflict_add:    `In conflict, your CD blend means you fight hard and smart. You prepare your position, you argue from evidence, and you push for compliance. The risk is that winning becomes more important than resolving, and you can damage relationships by being technically correct in a way that feels personally hostile.`,
+    environment_add: `You thrive in high-stakes, high-standards environments, audit, legal, engineering leadership, quality management, senior strategy roles. You need contexts where excellence is the expectation and where your refusal to accept less is a competitive advantage rather than a cultural friction.`,
+    growth_add:      `Your CD growth challenge is developing genuine curiosity about perspectives that challenge your conclusions. Your analytical rigour and decisive instinct combine to make you resistant to information that does not fit your model. The growth move is building in deliberate dissent: seeking out the person most likely to disagree and genuinely listening.`,
+    thirty_day_add:  `Before your next three major decisions, ask one person who will give you the strongest possible counter-argument to your current position. Listen fully before you respond. Track whether any of your decisions changed as a result.`,
+  },
+
+  'Ci': {
+    core_add:        `Your secondary Influence means your Conscientiousness is more socially aware than it appears from the outside. You care about relationships, about how you are received, and about whether the people around you respect your work. This makes you more relationally sensitive than a pure C profile and more attuned to the emotional temperature of your environment.`,
+    strengths_add:   `Your Ci blend makes you effective in roles that require both analytical precision and stakeholder communication, data strategy, people analytics, technical account management, learning and development, communications strategy. You can translate between rigour and relationship in ways that most profiles cannot.`,
+    communication_add: `You communicate with care and social awareness. You are more diplomatic than a pure C, more warm, and more attentive to how your message lands. The risk is that your desire to be well-received softens your precision, you edit for palatability rather than accuracy.`,
+    conflict_add:    `In conflict, your Ci blend means you want to be both right and liked, which is a difficult position to maintain under pressure. You may argue your case carefully and then back down when the social cost becomes apparent, leaving both your position and your relationship in an ambiguous state.`,
+    environment_add: `You thrive in environments where analytical capability and interpersonal skill are both valued, strategy consultancies, people teams, client-facing technical roles, internal communications, organisational design. You need contexts where getting it right matters and where relationships are the medium through which getting it right happens.`,
+    growth_add:      `Your Ci growth challenge is learning to deliver difficult analysis without softening the conclusion to protect the relationship. Your technical credibility is high enough to sustain the impact of an uncomfortable finding. The work is trusting that the relationship is strong enough to absorb the honesty.`,
+    thirty_day_add:  `Identify one piece of analysis or feedback you have been softening to protect a relationship. Deliver the full, unedited version this month. Track the response.`,
+  },
+
+  'CS': {
+    core_add:        `Your secondary Steadiness means your Conscientiousness is patient and enduring. You do not just analyse, you sustain. You build systems that work over time, maintain standards without drama, and provide a kind of quiet organisational reliability that most people do not fully appreciate until it is gone.`,
+    strengths_add:   `Your CS blend makes you one of the most structurally valuable profiles in any organisation. You build processes that work, maintain them reliably, and improve them incrementally. The infrastructure of high-performing operations often has a CS profile behind it.`,
+    communication_add: `You communicate with quiet precision. You say what you mean, you mean what you say, and you do not use more words than necessary. People learn to pay attention when you speak because you have not wasted their attention before. The risk is that important observations go unsaid because the bar for speaking up feels too high.`,
+    conflict_add:    `In conflict, your CS blend means you are slow to engage and methodical when you do. You will present your case clearly and then wait. You are patient in disagreement, which can be disarming. The risk is that your preference for stability means you will often accommodate an imperfect resolution rather than push for a complete one.`,
+    environment_add: `You thrive in structured, process-oriented organisations where quality and stability are genuine values, operations, finance, compliance, research, infrastructure, governance roles. You need environments where long-term thinking is rewarded and where your commitment to getting things right is appreciated rather than slowed down.`,
+    growth_add:      `Your CS growth challenge is developing comfort with the disruption that improvement requires. Your combination of precision and stability means you can maintain systems better than almost anyone, but you can also resist changes that would make those systems significantly better. The growth move is distinguishing between stability that protects and stability that preserves the status quo past its usefulness.`,
+    thirty_day_add:  `Identify one process you maintain that could be improved but that you have not changed because it works well enough. Make one deliberate improvement to it this month. Track whether the stability you feared losing actually disappears.`,
+  },
+};
+
+function getExtendedModifier(primary, secondary, field) {
+  const blend = primary + secondary;
+  const mod = BLEND_EXTENDED[blend];
+  if (!mod) return '';
+  return mod[field] || '';
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// BLEND MODIFIERS, Secondary style influence on primary narrative
+// Adds precision to blind spots, stress arc and team value
+// ══════════════════════════════════════════════════════════════════════
+const BLEND_MODIFIERS = {
+
+  // ── D + secondary ────────────────────────────────────────────────────
+  'Di': {
+    blind_spot_add:   `Your secondary Influence means you can also overestimate how much buy-in you have built. People enjoy your energy and say yes in the moment, which you read as commitment. Check alignment, not just enthusiasm.`,
+    stress_add:       `Under pressure, your i secondary activates first, you become louder and more persuasive before you become controlling. This makes your stress cycle harder for others to read because the early warning looks like confidence, not distress.`,
+    team_value_add:   `You combine the rare ability to both decide and inspire. Most teams have one or the other. You offer both, which makes you disproportionately effective at getting people moving in the same direction.`,
+  },
+  'DS': {
+    blind_spot_add:   `Your secondary Steadiness creates an internal conflict most people cannot see: you want results fast, but you also genuinely care whether your team is okay. When this tension is unmanaged, you can appear inconsistent, decisive one day, accommodating the next.`,
+    stress_add:       `Under pressure, your S secondary pulls you toward protecting team stability even when the situation demands a harder call. You may delay a necessary decision to avoid disrupting relationships, which extends the very pressure you are trying to resolve.`,
+    team_value_add:   `You bring execution without abandoning the people doing the work. This makes you a rare kind of results-driver, one that teams will actually follow rather than comply with.`,
+  },
+  'DC': {
+    blind_spot_add:   `Your secondary Conscientiousness means you hold yourself and others to unusually high standards. You want results AND accuracy, which is a powerful combination, but it can make you hypercritical of work that is good enough but not perfect.`,
+    stress_add:       `Under pressure, you can become simultaneously demanding and analytical, pushing hard for outcomes while also slowing down to question the method. This combination is exhausting for teams and can create paralysis at the exact moment momentum is needed.`,
+    team_value_add:   `You are among the rare profiles who combine speed with rigour. Most people either move fast or get it right. You hold both standards, which means what you deliver can be trusted.`,
+  },
+
+  // ── i + secondary ────────────────────────────────────────────────────
+  'iD': {
+    blind_spot_add:   `Your secondary Dominance means your ego is closer to the surface than you realise. You read pushback as rejection rather than input, and you can turn collaborative conversations into competitions without intending to.`,
+    stress_add:       `Under pressure, your D secondary activates and you shift from inspiring to controlling. The people who were energised by you suddenly feel overridden by you. This transition is fast and catches people off guard because your baseline is so warm.`,
+    team_value_add:   `You are a natural leader who makes people feel both believed in and accountable. That combination is exceptionally rare and is the foundation of high-performing team culture.`,
+  },
+  'iS': {
+    blind_spot_add:   `Your secondary Steadiness amplifies your discomfort with conflict. You will work very hard to keep everyone happy, which means hard truths get softened, delayed or avoided entirely. Problems you should address at a two become tens before you act.`,
+    stress_add:       `Under pressure, you become even more focused on managing how people feel about the situation rather than the situation itself. You may give reassurances you cannot deliver because the emotional need in the room feels more urgent than the practical one.`,
+    team_value_add:   `You are the person who holds teams together during difficulty, not through authority but through genuine warmth and a consistent belief that people matter. Teams with someone like you in them have lower attrition and higher psychological safety.`,
+  },
+  'iC': {
+    blind_spot_add:   `Your secondary Conscientiousness means you can over-think how you are being perceived. You want to be liked AND respected AND accurate, which is an exhausting internal standard. You may rehearse conversations, over-prepare presentations and second-guess yourself in ways that slow you down.`,
+    stress_add:       `Under pressure, your C secondary pulls you toward analysis and your i primary pulls you toward social reassurance. You may find yourself preparing extensively, talking about your preparation, and still not making the decision. The two styles compete rather than collaborate.`,
+    team_value_add:   `You combine social intelligence with structural thinking, which makes you effective in stakeholder management, communication planning and any role where you need to build trust while delivering complexity clearly.`,
+  },
+
+  // ── S + secondary ────────────────────────────────────────────────────
+  'SD': {
+    blind_spot_add:   `Your secondary Dominance means that when you do decide to act, you act decisively, but the buildup is slow and the switch can feel sudden to people around you. They experience you as patient and then abruptly firm, which can feel inconsistent even when it is not.`,
+    stress_add:       `Under pressure, your D secondary activates and you become more directive than usual. People who rely on your patience are surprised by this, which can damage the trust you have built. Your stress response is essentially a personality shift.`,
+    team_value_add:   `You are the person who executes reliably and can step up decisively when the situation demands it. Teams can depend on you completely while also knowing you will not let things drift indefinitely.`,
+  },
+  'Si': {
+    blind_spot_add:   `Your secondary Influence means you invest deeply in relationships and genuinely care about the people you work with. The risk is that you can over-extend yourself socially and professionally, taking on responsibilities that belong to others because saying no feels like letting people down.`,
+    stress_add:       `Under pressure, you talk more, connect more and seek reassurance more, but the underlying issue often remains unaddressed. You manage the emotional temperature of the situation rather than the situation itself. This can make you appear more calm than you are.`,
+    team_value_add:   `You are the relational backbone of any team you are part of. You remember what matters to people, you notice when someone is struggling, and you create the conditions in which other people can do their best work.`,
+  },
+  'SC': {
+    blind_spot_add:   `Your secondary Conscientiousness compounds your natural caution. You are patient AND precise, which produces excellent work but can make you reluctant to proceed without certainty that is not always available. You can become the bottleneck in a process through thoroughness rather than resistance.`,
+    stress_add:       `Under pressure, you slow down and check more carefully, which is the opposite of what fast-moving situations require. Your instinct is to apply more rigour when the situation is uncertain, which extends timelines and frustrates stakeholders who need momentum.`,
+    team_value_add:   `You build systems and processes that outlast you. Your combination of patience and precision means the infrastructure you create actually gets used, because it is both reliable and understandable to the people who inherit it.`,
+  },
+
+  // ── C + secondary ────────────────────────────────────────────────────
+  'CD': {
+    blind_spot_add:   `Your secondary Dominance means you not only hold high standards but enforce them. When others fall short, you can become critical and controlling in ways that damage working relationships. You experience this as maintaining quality. Others experience it as being managed by a standard they cannot meet.`,
+    stress_add:       `Under pressure, your D secondary activates and you become directive as well as analytical. You want both control and correctness simultaneously. Teams experience this as a form of pressure that has no release valve, you will not accept imperfect work AND you will not slow down to explain.`,
+    team_value_add:   `You are among the most rigorous profiles in any organisation. Your combination of analytical precision and results focus makes you the person who produces work that is both accurate and consequential, not merely correct, but correct in a way that moves things forward.`,
+  },
+  'Ci': {
+    blind_spot_add:   `Your secondary Influence means you care more about how you are perceived than your analytical exterior suggests. Criticism of your work can feel disproportionately personal, and you may find yourself softening assessments to preserve relationships in ways that compromise your own standards.`,
+    stress_add:       `Under pressure, your i secondary looks for social reassurance while your C primary doubles down on analysis. You may find yourself explaining your reasoning at length to people who are not in a position to validate it, which feels productive but does not solve the underlying problem.`,
+    team_value_add:   `You communicate complex analysis with more warmth than most C profiles, which means your work lands with people rather than over them. You build trust through expertise and then keep it through connection, which gives you unusual reach.`,
+  },
+  'CS': {
+    blind_spot_add:   `Your secondary Steadiness amplifies your preference for stability and process. You are resistant to change, slow to commit to new approaches, and cautious about innovation. In a fast-moving environment, this combination can make you appear risk-averse even when the risk is low.`,
+    stress_add:       `Under pressure, both styles pull in the same direction, toward caution, process and stability. You respond to urgency by becoming more methodical, not less. This is the opposite of what crisis typically requires and can put you in conflict with stakeholders who need speed.`,
+    team_value_add:   `You are the institutional memory and quality standard of any team you are part of. Your combination of precision and consistency means that the things you build, the processes you design and the standards you maintain endure long after you have moved on.`,
+  },
+};
+
+function getBlendModifier(primary, secondary, field) {
+  const blend = primary + secondary;
+  const mod = BLEND_MODIFIERS[blend];
+  if (!mod) return '';
+  return mod[field] || '';
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SUGGESTED ROLES, 16 PERMUTATIONS
+// ══════════════════════════════════════════════════════════════════════
+const ROLES_16 = {
+  'D':  {
+    title: 'Results-driver, turnaround leader',
+    best:  ['CEO / Managing Director','Business Unit Head','Sales Director','Operations Director','Entrepreneur / Founder','Crisis Manager','Programme Director'],
+    avoid: ['Compliance Officer','Data Analyst','Customer Support','Administrative Coordinator','Research Scientist'],
+    why:   'Pure D profiles need authority, clear outcomes and minimal process. They thrive where pace is high and results are the primary measure of success.'
+  },
+  'Di': {
+    title: 'Persuasive leader, commercial driver',
+    best:  ['Sales Director / VP Sales','Business Development Lead','CEO / Founder','Client Partner','Public Speaker / Facilitator','Marketing Director','Commercial Director'],
+    avoid: ['Quality Assurance Manager','Backend Developer','Financial Controller','Compliance Analyst','Technical Writer'],
+    why:   'The Di combination is built for commercial environments where influence and outcomes both matter. You open doors and drive through them.'
+  },
+  'DS': {
+    title: 'Operational team leader, delivery manager',
+    best:  ['Operations Manager','Project Director','Team Lead / Department Head','General Manager','Supply Chain Director','Site Manager','Production Director'],
+    avoid: ['Creative Director','Research Analyst','Compliance Specialist','Independent Consultant','Academic Researcher'],
+    why:   'DS profiles balance execution with people management. You are most effective leading teams through sustained delivery where both pace and stability matter.'
+  },
+  'DC': {
+    title: 'Strategic analyst, high-standards executive',
+    best:  ['Chief Strategy Officer','Investment Director','Management Consultant','Engineering Director','Risk Director','Product Director','Senior Partner'],
+    avoid: ['Community Manager','Event Coordinator','Front-line Sales','Customer Success Manager','PR Manager'],
+    why:   'DC combines decisive execution with analytical rigour. You perform best in senior roles where both speed and correctness are requirements, not trade-offs.'
+  },
+  'i':  {
+    title: 'People connector, culture builder',
+    best:  ['Sales Manager','Account Manager','Brand Manager','L&D Facilitator','Culture Lead','Community Manager','PR & Communications Manager'],
+    avoid: ['Financial Auditor','Data Scientist','Compliance Manager','Laboratory Researcher','Technical Analyst'],
+    why:   'Pure i profiles need variety, human connection and visibility. You perform best in roles where your energy and enthusiasm are the primary tools of your trade.'
+  },
+  'iD': {
+    title: 'Inspirational leader, bold commercial force',
+    best:  ['Sales Leader','Founder / CEO','Business Development Director','Keynote Speaker','Head of Growth','Franchise Owner','Commercial Partner'],
+    avoid: ['Data Analyst','QA Engineer','Financial Controller','Compliance Officer','Technical Researcher'],
+    why:   'iD profiles combine inspiration with drive. You excel in leadership and commercial roles where rallying people AND delivering outcomes are both required.'
+  },
+  'iS': {
+    title: 'Team cohesion lead, trusted people partner',
+    best:  ['HR Business Partner','Employee Experience Lead','Training Manager','People & Culture Manager','Community Manager','Coaching & Development Lead','Client Relationship Manager'],
+    avoid: ['Chief Financial Officer','Auditor','Data Engineer','Compliance Director','Operations Analyst'],
+    why:   'iS profiles are the relational glue of organisations. You perform best in people-centred roles where warmth, loyalty and sustained connection produce real value.'
+  },
+  'iC': {
+    title: 'Strategic communicator, stakeholder manager',
+    best:  ['Communications Director','Stakeholder Manager','Strategy Consultant','People Analytics Lead','Programme Manager','L&D Designer','Internal Communications Lead'],
+    avoid: ['Production Line Manager','Rapid Sales Closer','Field Operations Manager','Logistics Coordinator','Plant Manager'],
+    why:   'iC profiles bridge analytical and relational functions. You are most effective in roles where structured thinking must be communicated with warmth and credibility.'
+  },
+  'S':  {
+    title: 'Reliable executor, steady team anchor',
+    best:  ['Operations Coordinator','Customer Success Manager','Project Coordinator','Office Manager','Nurse / Healthcare Professional','Teacher / Trainer','Logistics Coordinator'],
+    avoid: ['Chief Executive Officer','Crisis Manager','Day Trader','Rapid Sales Role','Change Management Lead'],
+    why:   'Pure S profiles are the backbone of execution. You perform best in roles with clear expectations, stable environments and consistent human relationships.'
+  },
+  'SD': {
+    title: 'Operational backbone, reliable team lead',
+    best:  ['Operations Team Lead','Site Supervisor','Facilities Manager','Quality Manager','Project Manager','Production Supervisor','Service Delivery Manager'],
+    avoid: ['Startup CEO','Creative Director','Strategy Consultant','VC / Investment Analyst','Crisis Communications Lead'],
+    why:   'SD profiles are steady, reliable and capable of decisive action when required. You perform best in operational leadership roles with clear accountability.'
+  },
+  'Si': {
+    title: 'Empathetic people leader, culture carrier',
+    best:  ['HR Manager','Team Leader / People Manager','Social Worker','Counsellor / Coach','Learning & Development Manager','Employee Relations Manager','Community Lead'],
+    avoid: ['Financial Auditor','Data Scientist','Hard Closer / Transactional Sales','Compliance Officer','Systems Engineer'],
+    why:   'Si profiles are deeply people-oriented and emotionally intelligent. You perform best in roles where genuine care for others is the primary qualification.'
+  },
+  'SC': {
+    title: 'Systematic supporter, process guardian',
+    best:  ['Quality Assurance Manager','Compliance Officer','Systems Administrator','Operations Analyst','Process Improvement Manager','Finance Manager','Documentation Specialist'],
+    avoid: ['Entrepreneur / Founder','Fast-paced Sales Role','Change Manager','Creative Director','Startup Lead'],
+    why:   'SC profiles build systems that last. You are most effective in roles where process design, quality control and consistent execution are the core deliverables.'
+  },
+  'C':  {
+    title: 'Precision analyst, quality specialist',
+    best:  ['Data Scientist / Analyst','Financial Analyst','Research Scientist','Quality Assurance Lead','Compliance Manager','Software Engineer','Actuary'],
+    avoid: ['Sales Manager','Events Manager','PR Lead','Community Builder','Fast-paced People Manager'],
+    why:   'Pure C profiles are at their best where accuracy is the primary measure. You need environments where getting it right matters more than getting it fast.'
+  },
+  'CD': {
+    title: 'Perfectionist controller, quality executive',
+    best:  ['Quality Director','Chief Risk Officer','Technical Director','Senior Auditor','Engineering Manager','Legal Director','Data Architecture Lead'],
+    avoid: ['Front-line Sales','Community Manager','Event Coordinator','Brand Activations Lead','PR Manager'],
+    why:   'CD profiles combine analytical precision with decisive authority. You excel in senior roles where both standards and outcomes matter and you have control over both.'
+  },
+  'Ci': {
+    title: 'Analytical communicator, technical relationship builder',
+    best:  ['People Analytics Lead','Technical Account Manager','UX Researcher','Strategic Communications Manager','Data-driven Marketing Lead','L&D Specialist','Organisational Development Consultant'],
+    avoid: ['Hard Sales Closer','Crisis Response Manager','Field Operations Lead','Production Floor Manager','High-volume Call Centre Manager'],
+    why:   'Ci profiles translate between analytical and human systems. You are most effective in roles requiring both technical credibility and interpersonal skill.'
+  },
+  'CS': {
+    title: 'Structured stabiliser, institutional builder',
+    best:  ['Finance Manager','IT Operations Manager','Process Engineer','Compliance & Risk Manager','Technical Project Manager','Library or Knowledge Manager','Systems Analyst'],
+    avoid: ['Startup Founder','Creative Director','Business Development Lead','Public Speaker','Brand Manager'],
+    why:   'CS profiles build organisations that outlast any individual. You are most effective in roles where long-term reliability, process integrity and quiet excellence define success.'
+  },
+};
+
+function getRoles(primary, secondary) {
+  const blend = primary + secondary;
+  return ROLES_16[blend] || ROLES_16[primary] || ROLES_16['D'];
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// WORKING WITH OTHERS, Style-sensitive tips per respondent primary
+// ══════════════════════════════════════════════════════════════════════
+const WORKING_TIPS = {
+  'D': {
+    D: 'Match their pace and directness. Lead with the result, skip the preamble. If you disagree, hold your position with a clear argument, they respect principled pushback. Redirect competitive escalation toward the shared goal before it becomes personal.',
+    i: 'Acknowledge their ideas visibly before moving to substance. A brief personal exchange before the task conversation makes a real difference. Avoid pure task mode, they read it as coldness. The most effective phrase: "I love this idea, and here is how we make it land."',
+    S: 'Slow your pace deliberately. Ask for their input and wait fully before responding. Never surprise them with sudden shifts. They are your most loyal collaborators if you invest in the relationship. The most effective phrase: "I want to understand your perspective before we decide anything."',
+    C: 'Give data, time and analytical space before expecting a decision. Validate their precision rather than treating it as an obstacle. Their quality instinct combined with your pace is complementary when both are respected. The most effective phrase: "Here is the data. What am I missing?"',
+  },
+  'i': {
+    D: 'Lead with the outcome and be direct. Skip the social warm-up, they will see through it. Bring energy to execution, not just ideas. They respect you when you deliver, not when you impress. The most effective phrase: "Here is what I am going to make happen."',
+    i: 'Bring the energy and match theirs. Before diving into task mode, give the idea room to breathe. Be careful: two i profiles can generate enormous enthusiasm and very little follow-through. One of you needs to anchor the conversation in deliverables.',
+    S: 'Slow down and check in genuinely before moving to the task. They need to feel you care about them, not just what they can produce. Ask questions and actually wait for the answers. The most effective phrase: "How are you finding things at the moment?"',
+    C: 'Give them structure, data and preparation time. They will not perform under your natural spontaneity. Ask in advance, not in the moment. Validate their thoroughness rather than rushing it. The most effective phrase: "I have put together what I know, what questions do you have?"',
+  },
+  'S': {
+    D: 'Be direct and clear about what you need. They do not want extended relationship-building before the task conversation. Lead with the ask, be specific about the outcome, and be prepared to be challenged. The most effective phrase: "Here is the outcome I need and by when."',
+    i: 'Match their warmth and give them genuine acknowledgement before moving to the work. They perform better when they feel energised by the interaction. A short personal connection before the task makes a real difference to their output.',
+    S: 'Take the time to build the relationship before expecting full collaboration. You share a similar pace and values. Be careful: two S profiles can avoid necessary conversations in the interest of harmony. Commit to naming issues even when it feels uncomfortable.',
+    C: 'Give them space, data and time. Do not rush them into decisions. Show your work, they trust processes they can follow. Acknowledge their precision explicitly. The most effective phrase: "Take the time you need, here is all the information I have."',
+  },
+  'C': {
+    D: 'Lead with logic and evidence. Keep it brief. They will make the decision fast, your job is to make the case clearly and accurately. Do not over-explain or add caveats. The most effective phrase: "Here is my analysis and my recommendation."',
+    i: 'Acknowledge their enthusiasm before presenting your data. They need to feel included before they can engage with substance. Make your analysis accessible, not just accurate. The most effective phrase: "Here is something interesting I found, I think you will see the opportunity in this."',
+    S: 'Be patient with their pace and warm in your delivery. They respond well to thoroughness and genuine care. Do not present your analysis coldly. Show that you considered the impact on people, not just the logical outcome.',
+    C: 'You share the same analytical instincts and quality standards. Work to prevent mutual over-analysis. Establish a decision deadline before you start. One of you needs to play the role of the person who moves things forward, explicitly agree on who that is.',
+  },
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// COACHING & KPI DATA, 16 PERMUTATIONS
+// ══════════════════════════════════════════════════════════════════════
+const COACHING_16 = {
+  'D':  {coaching:'Direct, confrontational, outcome-focused. Do not soften. They lose respect for you immediately if you do.',kpi:'Output only, revenue, deals closed, projects completed. Never activity metrics.',trigger:'Loss of control or slow-moving people.',correction:'Remove bottlenecks fast. Give bigger problems, not more rules.',failure:'Runs over the team and destroys morale without noticing.'},
+  'Di': {coaching:'High energy and grounded in reality. "You are great at opening doors. How many actually closed?"',kpi:'Revenue, conversion rate, presentations, pipeline visibility.',trigger:'Excitement without execution.',correction:'Force written commitments and daily follow-up tracking. Public scoreboards work.',failure:'Talks big, under-delivers, blames circumstances.'},
+  'DS': {coaching:'Balanced, firm and supportive simultaneously. "You are protecting harmony, but results are slipping."',kpi:'Output plus team KPIs, both individual and collective.',trigger:'Conflict between results and team harmony.',correction:'Coach decision-making under pressure. Help them prioritise outcome over comfort.',failure:'Hesitates when team friction appears. Delays necessary calls.'},
+  'DC': {coaching:'Logical and structured. "Your analysis is strong, but speed is killing your impact."',kpi:'Accuracy, efficiency, ROI, decision speed.',trigger:'Poor logic or sloppy thinking from others.',correction:'Introduce decision deadlines. The 80 percent rule: decide when you have enough, not when you have everything.',failure:'Slows down execution with over-analysis.'},
+  'i':  {coaching:'Encouraging but structured. "You bring energy, but energy without results does not count."',kpi:'Activities and interactions, calls, meetings, engagements. Short feedback loops.',trigger:'Isolation or monotony.',correction:'Break work into short sprints with immediate feedback.',failure:'Inconsistent execution. Starts strong, drops off.'},
+  'iD': {coaching:'Respect their leadership, hold them accountable. "People listen to you. Are you leading them to results?"',kpi:'Team results plus influence metrics.',trigger:'Not being heard or seen.',correction:'Acknowledge first, then redirect to execution. Tie influence to measurable outcomes.',failure:'Ego drives decisions over evidence.'},
+  'iS': {coaching:'Safe, calm, but firm. "Avoiding conflict is hurting performance."',kpi:'Team contribution, feedback scores, engagement metrics.',trigger:'Conflict and rejection.',correction:'Script difficult conversations in advance. Train assertiveness gradually.',failure:'Avoids tough decisions. Creates false harmony.'},
+  'iC': {coaching:'Structured discussion. "You are preparing too much. When do you act?"',kpi:'Quality of communication, planning accuracy, stakeholder satisfaction.',trigger:'Unclear expectations.',correction:'Set preparation time limits. Force action before comfort is reached.',failure:'Over-prepares, slow to execute.'},
+  'S':  {coaching:'Calm and consistent. "You are reliable, but you are staying too safe."',kpi:'Consistency metrics, on-time delivery, reliability, completion rate.',trigger:'Rapid unannounced change.',correction:'Explain the why before the what. Give transition time. Introduce change gradually.',failure:'Passive resistance. Builds silent resentment.'},
+  'SD': {coaching:'Appreciative but observant. "You are taking on too much. Where is your limit?"',kpi:'Task completion, reliability, capacity utilisation.',trigger:'Being overloaded without acknowledgement.',correction:'Proactive weekly capacity check-ins. They will not ask for help.',failure:'Accepts too much silently, then underperforms across everything.'},
+  'Si': {coaching:'Emotionally aware. "You are carrying everyone\'s emotions. That is not your job."',kpi:'Engagement, satisfaction, team retention.',trigger:'Emotional overwhelm or toxic environment.',correction:'Teach boundary-setting. Clarify what is their responsibility and what belongs to others.',failure:'Emotional burnout. Absorbs team distress until they cannot perform.'},
+  'SC': {coaching:'Logical and safe. "Your system is strong. But can it handle change?"',kpi:'Accuracy, process adherence, error rate.',trigger:'Chaos or unclear process.',correction:'Reintroduce structure immediately when disruption occurs. Give SOPs.',failure:'Rigidity. Resists necessary change even when evidence supports it.'},
+  'C':  {coaching:'Data-driven. "Your accuracy is high. But decisions are too slow."',kpi:'Error rate, quality benchmarks, analysis turnaround time.',trigger:'Lack of clarity or incomplete information.',correction:'Enforce decision deadlines. Provide full context upfront.',failure:'Analysis paralysis. Waits for certainty that never comes.'},
+  'CD': {coaching:'Structured challenge. "Perfect is delaying results."',kpi:'Quality benchmarks and delivery timelines, both matter equally.',trigger:'Imperfection and lack of control.',correction:'Define "done" explicitly. Set deadlines with quality thresholds attached.',failure:'Perfectionism delays output and demoralises the team.'},
+  'Ci': {coaching:'Low pressure and structured. "You have good thoughts, but you are not sharing them."',kpi:'Communication accuracy, stakeholder engagement, meeting contribution.',trigger:'Public pressure or being put on the spot.',correction:'Use pre-read materials. Allow written responses. Ask for input in advance of meetings.',failure:'Silence. Important observations go unsaid.'},
+  'CS': {coaching:'Step-by-step. "This change is necessary, here is how we will do it safely."',kpi:'Process reliability, long-term consistency, system accuracy.',trigger:'Disruption without logical justification.',correction:'Show the step-by-step reasoning for any change before implementing it.',failure:'Resists change. Maintains processes past their usefulness.'},
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// MANAGER GUIDE, 16 PERMUTATIONS
+// Source: Trident Talents DISC Permutations Framework
+// ══════════════════════════════════════════════════════════════════════
+const MANAGER_GUIDE_16 = {
+
+  // ── D PRIMARY ────────────────────────────────────────────────────────
+  'D': `To get the best from this person, give them a clear goal and meaningful autonomy over how they reach it. Check in on outcomes, not methods. When you need to redirect them, do it directly and early. They respond far better to honest challenge than to diplomatic softening that obscures the message. Avoid public criticism because it activates their defensive instincts in ways that are counterproductive for everyone. Recognise their results specifically and promptly. The thing most likely to make them disengage is feeling that their judgment is not trusted. Their trigger is loss of control. Remove bottlenecks fast and set KPIs around output only, not activity tracking.`,
+
+  'Di': `To get the best from this person, set clear outcomes with visible stakes and let them own the how. They combine drive with persuasion, so put them in client-facing, pitching or leadership roles where their energy closes deals. Anchor them with deliverables and deadlines because excitement without a tracking system leads to under-delivery. Ask them regularly: what is the close plan? Recognise both the result and the influence they built to get there. Their trigger is being ignored or unseen. Respond by giving them a scoreboard and an audience. They perform when performance is visible.`,
+
+  'DS': `To get the best from this person, balance challenge with stability. Give them structured goals with clear team responsibility. They will push for results but genuinely care whether people are brought along. Do not force rapid change without context because the internal conflict between pace and harmony will slow them down. Use them as team leads where execution and cohesion both matter. When results slip because they are protecting relationships, name it directly: help them prioritise the outcome over the comfort. Their trigger is conflict between achieving and maintaining. Coach decision-making under pressure.`,
+
+  'DC': `To get the best from this person, give them data and authority simultaneously. They want to be both right and effective. Involve them in decision frameworks, ask for their analysis before asking for their action, and show structured reasoning when you need them to change course. Do not rush decisions without logic because they will either comply superficially or resist completely. Their trigger is poor logic and sloppy thinking. Introduce the 80 percent rule: good enough to move is better than perfect too late. Set decision deadlines and hold them.`,
+
+  // ── i PRIMARY ────────────────────────────────────────────────────────
+  'i': `To get the best from this person, give them visible roles, genuine recognition, and regular human connection. They perform dramatically better when they feel seen and valued. Give feedback in private and with warmth. Hold them accountable to commitments gently but consistently because they will not naturally create structure for themselves. Avoid extended isolation. Their trigger is boredom and monotony. Reintroduce social energy when performance drops. Keep tasks short and varied. Use recognition as a management tool, not just a reward.`,
+
+  'iD': `To get the best from this person, respect their leadership instinct while controlling the outcomes. Put them in presentations, pitching and vision-setting roles where their bold, rallying energy is an asset. Acknowledge before you redirect. When you need them to shift focus, frame it as a bigger opportunity, not a correction. Their trigger is not being heard or not being given a platform. Tie authority to measurable outcomes so influence does not become a substitute for execution. Hold them accountable for what their team produces, not just what they say.`,
+
+  'iS': `To get the best from this person, build psychological safety first. They are warm, relationship-driven and deeply conflict-averse. Give them onboarding, team cohesion and engagement responsibilities where their natural empathy creates real value. Ask for feedback from the team through them. Do not put them in aggressive confrontation roles without coaching. Their trigger is conflict and rejection. Gradually coach assertiveness by scripting difficult conversations before they happen. They will avoid necessary conversations until the damage is done without that structure.`,
+
+  'iC': `To get the best from this person, combine structure with communication. Give them planning and stakeholder roles where they need to document, synthesise and present. Clarify deliverables and standards clearly because ambiguity makes them over-prepare and slow down. Ask structured questions rather than open-ended ones. Their trigger is unclear expectations. Set preparation time limits so they do not spend 80 percent of their time getting ready and 20 percent executing. Force deadlines before comfort.`,
+
+  // ── S PRIMARY ────────────────────────────────────────────────────────
+  'S': `To get the best from this person, provide stability, routine and predictability. They will not speak up when overloaded or unhappy, which means you must check in proactively rather than waiting for signals. Give consistent workflows. Acknowledge their contribution regularly and sincerely because they will never ask for recognition. Shock changes without context are deeply destabilising. Their trigger is rapid unannounced change. Explain the why and give transition time. Introduce change gradually with a clear explanation of what stays the same.`,
+
+  'SD': `To get the best from this person, give them responsibility with support. They are your silent performers, the people doing the work without making noise about it. Recognise them quietly but meaningfully. Do not take advantage of their reliability by adding load without acknowledgement. Check capacity weekly because they will accept too much before raising a concern. Their trigger is being overloaded without being seen. Proactively manage their workload. When you need them to step up, frame it as a clear mandate with your backing, not an expectation they should figure out alone.`,
+
+  'Si': `To get the best from this person, use them in HR, support, engagement and culture-building roles where their combination of warmth and social energy creates cohesion. They absorb team emotions and often know the temperature of a group before anyone else. Give them space to process before expecting a decision. Do not expose them to toxic environments consistently. Their trigger is emotional overwhelm and conflict. Help them set professional boundaries because they will over-absorb what belongs to others. Coach them on the difference between caring for people and carrying people.`,
+
+  'SC': `To get the best from this person, give them clear systems, processes and expectations. Assign them process improvement, SOP development and quality assurance work where their combination of patience and precision produces lasting value. Let them refine workflows without interruption. Do not rush them without clarity. Their trigger is chaos and unclear process. When disruption is unavoidable, reintroduce structure immediately and show them the new system rather than just naming the change. Coach controlled flexibility by introducing one variation at a time.`,
+
+  // ── C PRIMARY ────────────────────────────────────────────────────────
+  'C': `To get the best from this person, give them clear quality standards, adequate time, and the autonomy to determine how they will meet them. When they need to move faster, explain why using logic, not directive pressure. Give feedback in private with specificity and evidence. Their trigger is lack of clarity and incomplete information. Provide full context before expecting a decision. Enforce decision deadlines because more data is always available and without a deadline they will wait for certainty that will not come. Define good enough clearly.`,
+
+  'CD': `To get the best from this person, channel their high standards rather than suppress them. Put them in quality control, auditing, compliance and technical leadership roles where precision is a genuine asset. Define what done looks like so perfectionism does not delay delivery. Their trigger is imperfection and lack of control. Set deadlines with quality thresholds attached. The question to ask them regularly is not "is it perfect?" but "does it meet the standard we agreed?" Coach them to distinguish between standards that protect the work and standards that protect their ego.`,
+
+  'Ci': `To get the best from this person, create safe communication channels and encourage expression without pressure. Ask structured questions and give them time to prepare before meetings. Do not put them on the spot in group settings. Their trigger is public pressure and being judged. Use pre-read materials and allow written responses where possible. When you need their input, ask in advance rather than in the moment. Coach them to share one contribution per meeting, however small, so their ideas reach the team rather than staying private.`,
+
+  'CS': `To get the best from this person, give them long-term process ownership where their combination of precision and stability builds systems that genuinely last. Let them maintain consistency across projects and functions. Do not force constant change. Their trigger is disruption without logic. When change is necessary, show them the step-by-step reasoning so they can understand the new system before they are asked to operate within it. Coach adaptability by introducing controlled variation incrementally rather than expecting wholesale acceptance of a new approach.`,
+};
+
+function getManagerGuide(primary, secondary) {
+  const blend = primary + secondary;
+  return MANAGER_GUIDE_16[blend] || MANAGER_GUIDE_16[primary] || '';
+}
 
 function buildReport(R) {
   const {adapted, natural, energyDrain, reliability, contexts} = R;
@@ -1711,7 +2286,7 @@ function buildReport(R) {
 
   <!-- ══ REPORT PAGES ══════════════════════════════════════════════ -->
   <div class="print-header">
-    <img src="${LOGO_SRC}" alt="Trident Talents">
+    <img src="${LOGO_SRC}" alt="Trident Talents" style="height:26px!important;width:auto!important;max-width:130px!important;object-fit:contain;">
     <span>DISC Multi-Context Assessment Report</span>
   </div>
 
@@ -1733,6 +2308,7 @@ function buildReport(R) {
   <div class="r-section">
     <div class="r-section-title">1. Your core identity, the ${N.label} style</div>
     ${N.core_identity.split('\n\n').map(p=>para(p)).join('')}
+    ${getExtendedModifier(pri, sec, 'core_add') ? insightBoxHTML('How your ' + sec + ' secondary shapes your identity', getExtendedModifier(pri, sec, 'core_add'), '') : ''}
   </div>
 
   <!-- ═══ SECTION 2: HOW YOU THINK ═══ -->
@@ -1741,6 +2317,7 @@ function buildReport(R) {
     ${N.thinking.split('\n\n').map(p=>para(p)).join('')}
     ${sectionHeading('How you make decisions', DIM_COLORS[pri])}
     ${N.decision_making.split('\n\n').map(p=>para(p)).join('')}
+    ${getExtendedModifier(pri, sec, 'thinking_add') ? insightBoxHTML('How your ' + sec + ' secondary shapes your thinking', getExtendedModifier(pri, sec, 'thinking_add'), '') : ''}
   </div>
 
   <!-- ═══ SECTION 3: 6-CONTEXT OVERVIEW ═══ -->
@@ -1824,6 +2401,7 @@ function buildReport(R) {
     ${N.motivators_detail.split('\n\n').map(p=>para(p)).join('')}
     ${sectionHeading('What drains and demotivates you', '#A32D2D')}
     ${N.demotivators_detail.split('\n\n').map(p=>para(p)).join('')}
+    ${getExtendedModifier(pri, sec, 'strengths_add') ? insightBoxHTML('Your ' + pri + sec + ' blend strengths', getExtendedModifier(pri, sec, 'strengths_add'), 'green') : ''}
   </div>
 
   <!-- ═══ SECTION 8: BLIND SPOTS ═══ -->
@@ -1831,12 +2409,14 @@ function buildReport(R) {
     <div class="r-section-title">8. Blind spots, the honest section</div>
     ${para('Blind spots are not character flaws. They are the natural side-effects of your strengths, operating without a filter. Every style has them. The ones below are specific to yours, and they are most likely to limit you not because of their intensity, but because of their invisibility.')}
     ${N.blind_spots.split('\n\n').map(p=>para(p)).join('')}
+    ${getBlendModifier(pri, sec, 'blind_spot_add') ? insightBoxHTML('Your ' + pri + sec + ' blend adds one more', getBlendModifier(pri, sec, 'blind_spot_add'), '') : ''}
   </div>
 
   <!-- ═══ SECTION 9: COMMUNICATION FINGERPRINT ═══ -->
   <div class="r-section">
     <div class="r-section-title">9. Your communication fingerprint</div>
     ${N.communication_style.split('\n\n').map(p=>para(p)).join('')}
+    ${getExtendedModifier(pri, sec, 'communication_add') ? insightBoxHTML('How your ' + sec + ' secondary changes your communication', getExtendedModifier(pri, sec, 'communication_add'), '') : ''}
   </div>
 
   <!-- ═══ SECTION 10: WORK vs HOME ═══ -->
@@ -1866,6 +2446,7 @@ function buildReport(R) {
     <div class="r-section-title">12. You under pressure, the stress escalation arc</div>
     ${para(`Your pressure profile is ${contexts.pressure.style}. When stakes rise, your behaviour shifts in a predictable pattern, not randomly, but in a direction that is characteristic of your style. Understanding this arc is one of the most practically useful things this report can give you.`)}
     ${N.stress_arc.split('\n\n').map(p=>para(p)).join('')}
+    ${getBlendModifier(pri, sec, 'stress_add') ? insightBoxHTML('How your ' + sec + ' secondary changes your stress pattern', getBlendModifier(pri, sec, 'stress_add'), 'amber') : ''}
     ${insightBoxHTML('The most important thing to know about your pressure response', `The most dangerous stage is not severe pressure, it is the transition from moderate to severe, because this is the point at which the people around you have already been affected, but you have not yet registered that your behaviour has changed significantly. Building a personal early warning system, knowing your specific signal that you have entered moderate pressure, and communicating it to the people closest to you is the single most effective pressure management strategy available to your style.`, '')}
   </div>
 
@@ -1890,21 +2471,24 @@ function buildReport(R) {
       <div class="conflict-card"><div class="cc-label">What to watch for</div><div class="cc-title">Destructive tendencies</div><div class="cc-body">{{ CONFLICT_DESTRUCTIVE }}</div></div>
     </div>
     ${insightBoxHTML('How to make conflict productive', '{{ CONFLICT_PRODUCTIVE }}', 'green')}
+    ${getExtendedModifier(pri, sec, 'conflict_add') ? insightBoxHTML('Your ' + pri + sec + ' conflict pattern', getExtendedModifier(pri, sec, 'conflict_add'), 'amber') : ''}
   </div>
 
   <!-- ═══ SECTION 15: WORKING WITH OTHERS ═══ -->
   <div class="r-section">
     <div class="r-section-title">15. Working with each style, your adapted guide</div>
-    ${para('The most effective communicators and collaborators are not those who found the right people to work with, they are those who learned to adapt their approach to whoever they are with. The guide below gives you a specific strategy for each of the four styles.')}
+    ${para('The most effective communicators are those who adapt their approach to whoever they are with. The guide below is written specifically for your ' + pri + (sec ? sec : '') + ' style, not generic advice, but what actually works for you when working with each type.')}
     <div style="overflow-x:auto;">
       <table class="adapt-table">
-        <thead><tr><th>Style</th><th>Name</th><th>Your approach</th></tr></thead>
+        <thead><tr><th>Style</th><th>Name</th><th>Your approach as a ${pri + (sec ? sec : '')}</th></tr></thead>
         <tbody>
-          ${[['D','#185FA5','Match their pace and directness. Lead with the result and skip any preamble. They respect confidence and competence above all else. If you disagree, hold your position with a clear logical argument, they will respect pushback that is principled. Watch for competitive escalation and redirect it toward the shared goal rather than allowing it to become personal. The most effective phrase with a D is: "Here is what I think needs to happen and why."'],
-             ['i','#D85A30','Acknowledge their ideas visibly and with genuine warmth before moving to substance. They need to feel energised by you before they will deliver for you. A brief personal exchange before the task conversation makes a material difference to their engagement. Avoid communicating in pure task mode, they read that as coldness and disengage accordingly. The most effective phrase with an i is: "I love this idea, and here is how I think we can make it land."'],
-             ['S','#1D9E75','Slow your pace slightly and ask for their input, then wait fully for the answer before responding. Give them time to process any change before demanding commitment. Never surprise them with sudden shifts in direction. They are your most loyal and steady collaborators if you invest in the relationship over time. The most effective phrase with an S is: "I want to understand your perspective before we decide anything."'],
-             ['C','#BA7517','Provide data, time and room to analyse before expecting a decision. Validate their precision rather than treating it as an obstacle. They will identify errors you created by moving fast, and their quality instinct combined with your pace is genuinely complementary when both are respected. The most effective phrase with a C is: "Here is the data. What am I missing?"']
-          ].map(([s,c,tip])=>`<tr><td><span class="sname" style="color:${c};">${s}</span></td><td>${STYLE_LABELS[s]||s}</td><td style="font-size:13px;">${tip}</td></tr>`).join('')}
+          ${['D','i','S','C'].map(s => {
+            const tips = (WORKING_TIPS[pri] || WORKING_TIPS['D']);
+            const tip = tips[s] || '';
+            const colors = {'D':'#185FA5','i':'#D85A30','S':'#1D9E75','C':'#BA7517'};
+            const labels = {'D':'Dominance','i':'Influence','S':'Steadiness','C':'Conscientiousness'};
+            return `<tr><td><span class="sname" style="color:${colors[s]};">${s}</span></td><td>${labels[s]}</td><td style="font-size:13px;">${tip}</td></tr>`;
+          }).join('')}
         </tbody>
       </table>
     </div>
@@ -1918,12 +2502,35 @@ function buildReport(R) {
   <div class="r-section">
     <div class="r-section-title">16. Ideal role and environment</div>
     ${N.ideal_environment.split('\n\n').map(p=>para(p)).join('')}
+    ${getExtendedModifier(pri, sec, 'environment_add') ? insightBoxHTML('Where your ' + pri + sec + ' blend performs best', getExtendedModifier(pri, sec, 'environment_add'), '') : ''}
   </div>
+
+  <!-- ═══ SECTION 16B: SUGGESTED ROLES ═══ -->
+  ${(()=>{
+    const roles = getRoles(pri, sec);
+    const bestList = roles.best.map(r=>`<li style="font-size:13px;padding:3px 0;color:var(--text-mid);">${r}</li>`).join('');
+    const avoidList = roles.avoid.map(r=>`<li style="font-size:13px;padding:3px 0;color:var(--text-mid);">${r}</li>`).join('');
+    return `<div class="r-section">
+    <div class="r-section-title">Role fit for the ${pri + (sec ? sec : '')} profile, ${roles.title}</div>
+    ${para(roles.why)}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
+      <div style="background:var(--blue-pale);border-radius:var(--radius);padding:14px 16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#185FA5;margin-bottom:8px;">Roles where you thrive</div>
+        <ul style="list-style:none;padding:0;margin:0;">${bestList}</ul>
+      </div>
+      <div style="background:#FCEBEB;border-radius:var(--radius);padding:14px 16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#A32D2D;margin-bottom:8px;">Roles that drain you</div>
+        <ul style="list-style:none;padding:0;margin:0;">${avoidList}</ul>
+      </div>
+    </div>
+  </div>`;
+  })()}
 
   <!-- ═══ SECTION 17: GROWTH TRAJECTORY ═══ -->
   <div class="r-section">
     <div class="r-section-title">17. Your growth trajectory</div>
     ${N.growth_trajectory.split('\n\n').map(p=>para(p)).join('')}
+    ${getExtendedModifier(pri, sec, 'growth_add') ? insightBoxHTML('Your ' + pri + sec + ' specific growth edge', getExtendedModifier(pri, sec, 'growth_add'), '') : ''}
   </div>
 
   <!-- ═══ SECTION 18: RADAR ═══ -->
@@ -1945,7 +2552,10 @@ function buildReport(R) {
   <div class="r-section">
     <div class="r-section-title">19. Your team value statement</div>
     ${para('The paragraph below has been written for you based on your profile. It is suitable for sharing in a team workshop, an onboarding introduction, a personal development conversation, or anywhere you want to communicate your working style to colleagues quickly and clearly.')}
-    ${insightBoxHTML(`${firstName}'s contribution to any team`, N.team_value, '')}
+    <div class="insight-box green">
+      <div class="insight-title">${firstName}'s contribution to any team</div>
+      <div class="insight-body">${para(N.team_value)}${getBlendModifier(pri, sec, 'team_value_add') ? para(getBlendModifier(pri, sec, 'team_value_add')) : ''}</div>
+    </div>
     ${para('You may want to edit this to make it fully your own. The goal is not a perfect description, it is a starting point for a conversation about how you work best.')}
   </div>
 
@@ -1959,13 +2569,38 @@ function buildReport(R) {
       <div class="action-card"><span class="ac-label ac-stop">Expect</span><div class="ac-title">The discomfort</div><div class="ac-body">${N.thirty_day.split('\n\n')[1] ? N.thirty_day.split('\n\n')[1].split('.')[0]+'.' : 'This will feel unnatural at first. That feeling is the signal you are growing.'}</div></div>
       <div class="action-card"><span class="ac-label ac-invest">Measure</span><div class="ac-title">The outcome</div><div class="ac-body">${N.thirty_day.split('\n\n')[3] || 'Track your progress weekly. At 30 days, assess what changed.'}</div></div>
     </div>
+    ${getExtendedModifier(pri, sec, 'thirty_day_add') ? insightBoxHTML('Additional experiment for your ' + pri + sec + ' blend', getExtendedModifier(pri, sec, 'thirty_day_add'), 'green') : ''}
   </div>
 
   <!-- ═══ SECTION 21: MANAGER'S GUIDE ═══ -->
   <div class="r-section">
     <div class="r-section-title">21. Manager's guide, for the people who lead ${firstName}</div>
-    ${para(`This section is written for ${firstName}'s manager, not for ${firstName}. It summarises what this profile needs to perform at its best, and what to avoid.`)}
-    ${insightBoxHTML(`How to get the best from ${firstName}`, N.manager_guide, '')}
+    ${para(`This section is written for ${firstName}'s manager, not for ${firstName}. It summarises what this profile needs to perform at its best, what to watch for, and how to coach it effectively.`)}
+    ${insightBoxHTML(`How to get the best from ${firstName}`, getManagerGuide(pri, sec), '')}
+    ${(()=>{
+      const blend = pri + sec;
+      const c = COACHING_16[blend] || COACHING_16[pri] || COACHING_16['D'];
+      return `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+        <div style="background:var(--blue-pale);border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#185FA5;margin-bottom:6px;">Coaching approach</div>
+          <div style="font-size:13px;color:var(--text-mid);line-height:1.6;">${c.coaching}</div>
+        </div>
+        <div style="background:var(--blue-pale);border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#185FA5;margin-bottom:6px;">KPI and measurement style</div>
+          <div style="font-size:13px;color:var(--text-mid);line-height:1.6;">${c.kpi}</div>
+        </div>
+        <div style="background:#FAEEDA;border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#BA7517;margin-bottom:6px;">Trigger point</div>
+          <div style="font-size:13px;color:var(--text-mid);line-height:1.6;">${c.trigger}</div>
+        </div>
+        <div style="background:#FAEEDA;border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#BA7517;margin-bottom:6px;">Correction strategy</div>
+          <div style="font-size:13px;color:var(--text-mid);line-height:1.6;">${c.correction}</div>
+        </div>
+      </div>
+      ${insightBoxHTML('Failure mode to watch for', c.failure, 'red')}`;
+    })()}
   </div>
 
   <div class="print-btn-row" style="display:none;"></div>
@@ -1980,12 +2615,25 @@ function buildReport(R) {
 
   // Conflict data inline
   const conflictData = {
-    D:{driver:'Winning, control and asserting your position over others.',destructive:'Hypercriticism, finger-pointing, aggressive bluntness, and a tendency to turn every disagreement into a competition.',productive:'Frame it as a shared problem to solve. Set a time limit on debate. Commit to hearing the other position fully before you respond. Ask yourself: do I want to win this argument, or do I want to resolve this situation?'},
-    i:{driver:'Being heard, understood and maintaining the approval of the people involved.',destructive:'Dramatising, gossiping to build alliances, impulsive emotional reactions, and avoidance of difficult but necessary conversations.',productive:'Separate the relationship from the issue. Write down your actual position before the conversation so that social pressure cannot shift you off it during the exchange.'},
-    S:{driver:'Agreement, peace and preserving the harmony of the relationship above all else.',destructive:'Passive resistance, silent resentment, excessive accommodation that does not reflect your actual view, and delayed withdrawal.',productive:'Name your position clearly and early, even a single sentence stating what you actually think. Unspoken positions do not get resolved; they accumulate.'},
-    C:{driver:'Fairness, accuracy and finding a resolution that is logically defensible.',destructive:'Withdrawal, over-analysis that prevents action, withholding engagement, and a tendency to become hypercritical of others when under pressure.',productive:'Set a decision deadline and honour it. Accept that some conflict cannot be resolved with evidence alone, sometimes the right answer involves a compromise that is imperfect by your standards but workable by everyone\'s.'},
+    D:  {driver:'Winning, control and asserting your position.',destructive:'Hypercriticism, finger-pointing, aggressive bluntness, turning every disagreement into a competition.',productive:'Frame it as a shared problem to solve. Set a time limit on debate. Ask yourself: do I want to win this argument, or do I want to resolve this situation?'},
+    Di: {driver:'Winning with audience buy-in, you want to be right AND admired.',destructive:'Aggressive persuasion, rallying others to your side before the issue is resolved, using charm to overwhelm rather than engage.',productive:'Separate the social from the substantive. State your position clearly before you start building coalition. Win the argument on its merits, not on who is in the room.'},
+    DS: {driver:'Achieving the outcome while protecting the relationship, a genuinely difficult combination.',destructive:'Delaying necessary confrontation to preserve harmony, producing false resolution that leaves both sides without clarity.',productive:'Decide before the conversation which matters more: the outcome or the relationship. Name your position in one sentence and hold it. Accommodation is not the same as resolution.'},
+    DC: {driver:'Being right, in control, and having the logical high ground simultaneously.',destructive:'Using data and authority as weapons, making the other person feel both overruled and intellectually inadequate.',productive:'Being right is not the same as resolving the situation. Ask one genuine question about the other position before you respond. It costs nothing and changes everything.'},
+    i:  {driver:'Being heard, understood and maintaining the approval of the people involved.',destructive:'Dramatising, gossiping to build alliances, impulsive emotional reactions, avoiding difficult but necessary conversations.',productive:'Separate the relationship from the issue. Write your actual position down before the conversation so social pressure cannot shift you off it.'},
+    iD: {driver:'Being heard AND prevailing, you want the relationship to survive but you also want to win.',destructive:'Charismatic force, being so energetic and confident in your position that opposition feels pointless rather than considered.',productive:'Write out the strongest version of the other position before you go in. Acknowledge it out loud before you present yours. This single step changes the conversation.'},
+    iS: {driver:'Harmony, you will sacrifice your actual position to prevent the discomfort of conflict.',destructive:'Agreeing to things you do not believe, creating false resolution that damages trust when the misalignment surfaces later.',productive:'Write down your position before the conversation. Commit to stating it once, clearly, regardless of the response. You do not have to fight for it, you just have to say it.'},
+    iC: {driver:'Being liked AND being correct, a combination that makes conflict internally exhausting.',destructive:'Over-preparing your argument while under-delivering it, softening the message to the point where it loses its meaning.',productive:'State your core point in one sentence before adding context. The relationship can handle honesty. What it cannot handle is the resentment of things left unsaid.'},
+    S:  {driver:'Agreement, peace and preserving the harmony of the relationship above all else.',destructive:'Passive resistance, silent resentment, excessive accommodation that does not reflect your actual view.',productive:'Name your position clearly and early, even one sentence. Unspoken positions do not get resolved, they accumulate.'},
+    SD: {driver:'Stability with accountability, you want to maintain the relationship and ensure the right outcome.',destructive:'Patience that tips into passivity, waiting so long to address an issue that the window for easy resolution has closed.',productive:'Set an internal deadline for raising an issue. If the problem is still present in 48 hours, raise it. Waiting for the right moment is often waiting for a moment that does not come.'},
+    Si: {driver:'Emotional safety and connection, you need to feel the relationship can survive this conversation before you can have it.',destructive:'Absorbing conflict rather than addressing it, using warmth and humour to defuse situations that actually need to be resolved.',productive:'Acknowledge that you find conflict uncomfortable, then proceed anyway. The relationship is almost always stronger than your fear of this conversation.'},
+    SC: {driver:'Order, process and a logically sound resolution that everyone can follow.',destructive:'Analysis that delays action, raising every concern before committing to any resolution, creating thoroughness that feels like obstruction.',productive:'Set a decision point and honour it. Not every conflict needs a perfect resolution, it needs a workable one. Define workable before you start.'},
+    C:  {driver:'Fairness, accuracy and finding a resolution that is logically defensible.',destructive:'Withdrawal, over-analysis, withholding engagement, becoming hypercritical of others under pressure.',productive:'Set a decision deadline and honour it. Accept that some conflict requires compromise that is imperfect by your standards but workable for everyone.'},
+    CD: {driver:'Being right AND in control of how the resolution happens.',destructive:'Making the other person feel intellectually inadequate and procedurally outmanoeuvred simultaneously.',productive:'Win the argument, then actively help the other person save face. You do not lose anything by doing this and you preserve the relationship\'s capacity to produce future results.'},
+    Ci: {driver:'Correctness with approval, you want the right answer and you want people to like you for having it.',destructive:'Softening your precision to manage the other person\'s feelings, which means the right answer never quite lands.',productive:'Deliver the full analysis. The relationship is strong enough to handle an uncomfortable finding. What damages it is the other person discovering later that you softened the truth.'},
+    CS: {driver:'Process integrity and relational stability, you want the resolution to follow the right steps and leave the relationship intact.',destructive:'Slow engagement, excessive caution, and accommodating imperfect resolutions rather than pushing for complete ones.',productive:'Define what resolution looks like before the conversation starts. You are more effective in conflict when you have a destination in mind rather than hoping the process will find one.'},
   };
-  const cf = conflictData[pri] || conflictData.D;
+  const blend = pri + sec;
+  const cf = conflictData[blend] || conflictData[pri] || conflictData.D;
   const finalHtml = html
     .replace('{{ CONFLICT_DRIVER }}', cf.driver)
     .replace('{{ CONFLICT_DESTRUCTIVE }}', cf.destructive)
