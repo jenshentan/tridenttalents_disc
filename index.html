@@ -935,7 +935,7 @@
       <div class="field-row">
         <label for="inp-email">Work email address <span style="color:#A32D2D;">*</span></label>
         <input type="email" id="inp-email" placeholder="your@company.com" autocomplete="email" oninput="validateField('email')">
-        <div class="field-error" id="err-email">Please enter a valid email address, e.g. name@company.com</div>
+        <div class="field-error" id="err-email">Please enter a valid email address, e.g. <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="a8c6c9c5cde8cbc7c5d8c9c6d186cbc7c5">[email&#160;protected]</a></div>
         <div class="field-success" id="ok-email">Valid email address.</div>
       </div>
       <div class="field-row">
@@ -1192,9 +1192,19 @@ function show(id) {
 }
 
 window.startAssessment = function() {
-  show('assessment');
-  startTimer();
-  renderQuestion();
+  try {
+    // Reset state every time assessment starts (guards against re-entry)
+    current = 0;
+    answers = new Array(QS.length).fill(null);
+    RESULTS = null;
+    USER_NAME = '';
+    show('assessment');
+    startTimer();
+    renderQuestion();
+  } catch(e) {
+    console.error('startAssessment error:', e);
+    alert('Something went wrong starting the assessment. Please refresh the page and try again.');
+  }
 }
 
 window.navigate = function(dir) {
@@ -1215,6 +1225,13 @@ window.navigate = function(dir) {
 function renderQuestion() {
   const q = QS[current];
   const sec = SECTIONS.find(s => s.id === q.s);
+
+  // Safety guard: if section not found, log and skip rendering
+  if (!sec) {
+    console.error('renderQuestion: no section found for q.s =', q.s, 'at index', current);
+    return;
+  }
+
   const pct = (current / QS.length) * 100;
 
   document.getElementById('prog-fill').style.width = pct + '%';
@@ -1434,7 +1451,27 @@ function validateField(field) {
 function validateAll() {
   const fields = ['name', 'email', 'email2', 'org', 'phone'];
   let allValid = true;
-  fields.forEach(f => { if (!validateField(f)) allValid = false; });
+  fields.forEach(f => {
+    const rule = {
+      name:   'inp-name',
+      email:  'inp-email',
+      email2: 'inp-email2',
+      org:    'inp-org',
+      phone:  'inp-phone',
+    };
+    const input = document.getElementById(rule[f]);
+    // Force-show error on empty required fields
+    if (input && !input.value.trim()) {
+      input.classList.add('error');
+      const errEl = document.getElementById('err-' + f);
+      if (errEl) errEl.classList.add('visible');
+      const okEl = document.getElementById('ok-' + f);
+      if (okEl) okEl.classList.remove('visible');
+      allValid = false;
+    } else {
+      if (!validateField(f)) allValid = false;
+    }
+  });
   return allValid;
 }
 
@@ -2116,7 +2153,7 @@ const ROLES_16 = {
     avoid: [
       'Quality Assurance Manager — detail-orientation and constraint are structural mismatches for this profile',
       'Backend Developer / Technical Analyst — solitary, precise, low-visibility work depletes Di energy rapidly',
-      'Financial Controller — compliance, accuracy and process adherence do not align with this profile's natural mode',
+      'Financial Controller — compliance, accuracy and process adherence do not align with this profile\'s natural mode',
       'Compliance Analyst — rule-following without authority or audience is antithetical to how this profile produces value',
       'Technical Writer — precision-dependent, low-relational, low-recognition work',
     ],
@@ -2134,7 +2171,7 @@ const ROLES_16 = {
       'Service Delivery Manager — client-facing operational leadership where results and relationships both count',
     ],
     avoid: [
-      'Creative Director — high ambiguity, low structure, and results that are hard to measure conflict with this profile's operating mode',
+      'Creative Director — high ambiguity, low structure, and results that are hard to measure conflict with this profile\'s operating mode',
       'Research Analyst — independent, low-authority, long-horizon work without clear team accountability',
       'Independent Consultant — portfolio working and constant context-switching without a stable team to lead',
       'Academic Researcher — extended ambiguity without tangible, near-term results',
@@ -2149,7 +2186,7 @@ const ROLES_16 = {
       'Investment Director / Fund Manager — analytical precision combined with the willingness to commit capital and own outcomes',
       'Management Consultant (Senior) — client-facing strategic work where credibility comes from both analysis and conviction',
       'Engineering Director — technical leadership where quality standards and delivery timelines must both be owned',
-      'Risk Director / CRO — identifying and owning risk at an organisational level requires both the DC's analytical depth and their decisiveness',
+      'Risk Director / CRO — identifying and owning risk at an organisational level requires both the DC\'s analytical depth and their decisiveness',
       'Product Director — defining what gets built and to what standard, with authority over both quality and pace',
       'Legal Director / General Counsel — precision, standards and decisive judgment all required in one role',
     ],
@@ -2158,9 +2195,9 @@ const ROLES_16 = {
       'Event Coordinator — logistically heavy and detail-dependent without the analytical substance this profile needs',
       'Front-line Sales — high-rejection, relationship-dependent and activity-metric-focused work is misaligned',
       'PR Manager — perception management and emotional intelligence-driven work does not leverage DC strengths',
-      'Customer Success Manager — empathy-first, relationship-maintenance roles that do not require the DC's analytical firepower',
+      'Customer Success Manager — empathy-first, relationship-maintenance roles that do not require the DC\'s analytical firepower',
     ],
-    why:   'DC combines the D's bias for action with the C's bias for correctness. In most situations, this is an exceptionally powerful combination. In a smaller number of situations, the tension between those two drives creates internal friction and decision delay. The DC's greatest professional challenge is making good-enough decisions fast enough. Their greatest professional asset is making high-quality decisions that others would have got wrong. The roles where they perform best are those where both of those statements are true simultaneously.'
+    why:   'DC combines the D\'s bias for action with the C\'s bias for correctness. In most situations, this is an exceptionally powerful combination. In a smaller number of situations, the tension between those two drives creates internal friction and decision delay. The DC\'s greatest professional challenge is making good-enough decisions fast enough. Their greatest professional asset is making high-quality decisions that others would have got wrong. The roles where they perform best are those where both of those statements are true simultaneously.'
   },
   'i':  {
     title: 'People connector, energy creator, culture catalyst',
@@ -2210,7 +2247,7 @@ const ROLES_16 = {
       'Learning & Development Manager — facilitating growth in others, combining enthusiasm for people with genuine care for their development',
       'People & Culture Manager — owning the human environment of an organisation',
       'Client Relationship Manager — sustained, warm, high-trust client relationships over time',
-      'Coaching & Development Lead — the iS profile is a natural coach: warm, patient, genuinely invested in the other person's growth',
+      'Coaching & Development Lead — the iS profile is a natural coach: warm, patient, genuinely invested in the other person\'s growth',
       'Community Manager — building belonging at scale through genuine connection',
     ],
     avoid: [
@@ -2220,7 +2257,7 @@ const ROLES_16 = {
       'Compliance Director — rule-following at senior levels without the relational substance this profile needs',
       'Operations Analyst — independent, process-focused work without the social and empathetic dimension',
     ],
-    why:   'iS profiles are the relational architecture of high-performing organisations. You combine the i's social energy and optimism with the S's depth of care and loyalty, producing a profile that people trust and are drawn to simultaneously. You perform best in roles where both connection and continuity matter — where building relationships is not a means to an end but a core part of the deliverable. The developmental challenge is the avoidance of necessary confrontation: your care for people can make it very difficult to deliver the honest feedback or performance management that those same people need.'
+    why:   'iS profiles are the relational architecture of high-performing organisations. You combine the i\'s social energy and optimism with the S\'s depth of care and loyalty, producing a profile that people trust and are drawn to simultaneously. You perform best in roles where both connection and continuity matter — where building relationships is not a means to an end but a core part of the deliverable. The developmental challenge is the avoidance of necessary confrontation: your care for people can make it very difficult to deliver the honest feedback or performance management that those same people need.'
   },
   'iC': {
     title: 'Strategic communicator, analytical people partner, structured relationship builder',
@@ -2258,7 +2295,7 @@ const ROLES_16 = {
       'Crisis Manager — high-speed, high-ambiguity, high-conflict environments are deeply draining for this profile',
       'Day Trader / Investment Speculator — rapid-fire decisions under pressure with high personal stakes',
       'Rapid Sales Role — high-rejection, high-pace, low-relationship transactional selling',
-      'Change Management Lead — ironically, the role most likely to expose the S profile's discomfort with exactly what the role exists to create',
+      'Change Management Lead — ironically, the role most likely to expose the S profile\'s discomfort with exactly what the role exists to create',
     ],
     why:   'Pure S profiles are the backbone of sustained execution in every organisation that has one. You show up, you follow through, you care genuinely about the people you work alongside and the people you serve. Your greatest professional asset is your reliability — not as a personality trait, but as a consistent, demonstrated pattern of doing what you said you would do, when you said you would do it, to the standard you implied. The most important developmental challenge for S profiles is learning to advocate for themselves — because their tendency to accommodate quietly means that their needs, their limits and their ambitions are frequently invisible to the people who could most help them.'
   },
@@ -2288,7 +2325,7 @@ const ROLES_16 = {
       'HR Manager / People Manager — the Si blend is one of the most naturally suited profiles for people leadership at every level',
       'Social Worker / Case Manager — sustained, caring, high-stakes relationship work with people who need genuine investment',
       'Counsellor / Coach — patient, warm, genuinely invested in the growth and wellbeing of others',
-      'Learning & Development Manager — caring about people's development is the core qualification, and Si profiles have it authentically',
+      'Learning & Development Manager — caring about people\'s development is the core qualification, and Si profiles have it authentically',
       'Employee Relations Manager — navigating sensitive workplace dynamics with both empathy and consistency',
       'Community Lead / Engagement Manager — building belonging and connection at scale through genuine care',
       'Team Leader / People Manager — leading teams through care, warmth and consistent follow-through',
@@ -2300,7 +2337,7 @@ const ROLES_16 = {
       'Compliance Officer — rule-following without the ability to invest in the people being governed',
       'Systems Engineer — technical precision and low-human-interaction work that does not leverage Si strengths',
     ],
-    why:   'Si profiles are the most naturally empathetic leaders in the DISC framework. You combine the i's warmth and social ease with the S's depth of loyalty and care, producing a profile that people genuinely love working with and deeply trust. Your greatest professional risk is the boundary problem: you care so genuinely about the people around you that you begin to carry their emotional experience as your own. The developmental challenge is learning to care for people without carrying them — a distinction that, once internalised, makes Si leaders among the most sustainably effective people-leaders in any organisation.'
+    why:   'Si profiles are the most naturally empathetic leaders in the DISC framework. You combine the i\'s warmth and social ease with the S\'s depth of loyalty and care, producing a profile that people genuinely love working with and deeply trust. Your greatest professional risk is the boundary problem: you care so genuinely about the people around you that you begin to carry their emotional experience as your own. The developmental challenge is learning to care for people without carrying them — a distinction that, once internalised, makes Si leaders among the most sustainably effective people-leaders in any organisation.'
   },
   'SC': {
     title: 'Process architect, quality guardian, systematic team anchor',
@@ -2320,7 +2357,7 @@ const ROLES_16 = {
       'Creative Director — unstructured, subjective, novelty-dependent work',
       'Startup Lead — the opposite of the stable, structured environment where SC profiles produce their best work',
     ],
-    why:   'SC profiles build systems that outlast any individual. Your combination of the S's patience and people-orientation with the C's precision and quality-focus produces work that is reliable, accurate and carefully considered. You are most effective in roles where the primary deliverable is long-term consistency rather than short-term performance, where the cost of error is high and the value of rigour is genuinely recognised. The developmental challenge for SC profiles is learning to adapt those systems when the organisation evolves past them — protecting process integrity at the expense of necessary progress is the most common professional failure mode for this blend.'
+    why:   'SC profiles build systems that outlast any individual. Your combination of the S\'s patience and people-orientation with the C\'s precision and quality-focus produces work that is reliable, accurate and carefully considered. You are most effective in roles where the primary deliverable is long-term consistency rather than short-term performance, where the cost of error is high and the value of rigour is genuinely recognised. The developmental challenge for SC profiles is learning to adapt those systems when the organisation evolves past them — protecting process integrity at the expense of necessary progress is the most common professional failure mode for this blend.'
   },
   'C':  {
     title: 'Precision specialist, analytical expert, quality-first professional',
@@ -2346,7 +2383,7 @@ const ROLES_16 = {
     title: 'Quality executive, precision authority, high-standards decision-maker',
     best:  [
       'Quality Director / VP Quality — owning quality at an organisational level with both analytical depth and executive authority',
-      'Chief Risk Officer — identifying, assessing and managing risk requires both the CD's precision and their willingness to own the position',
+      'Chief Risk Officer — identifying, assessing and managing risk requires both the CD\'s precision and their willingness to own the position',
       'Technical Director / CTO — technical leadership where standards and delivery timelines must be owned simultaneously',
       'Senior Auditor / Audit Director — precision-dependent, high-stakes and consequential work',
       'Engineering Manager — technical leadership where quality standards and execution pace must both be maintained',
@@ -2380,7 +2417,7 @@ const ROLES_16 = {
       'Production Floor Manager — physical, pace-dependent, low-precision work',
       'High-volume Call Centre Manager — high-activity, low-depth, pace-dependent management',
     ],
-    why:   'Ci profiles occupy a uniquely valuable position in most organisations: they are analytically rigorous AND interpersonally skilled. This combination is less common than either capability alone, and the roles where it is most needed — communicating complex findings, building credibility with diverse stakeholders, designing systems that humans will actually use — are also the roles where it creates the most distinctive value. The developmental challenge for Ci profiles is finding the balance between the C's preparation instinct and the i's need for authentic, spontaneous connection — both are real, and the best Ci performers have found a way to honour both.'
+    why:   'Ci profiles occupy a uniquely valuable position in most organisations: they are analytically rigorous AND interpersonally skilled. This combination is less common than either capability alone, and the roles where it is most needed — communicating complex findings, building credibility with diverse stakeholders, designing systems that humans will actually use — are also the roles where it creates the most distinctive value. The developmental challenge for Ci profiles is finding the balance between the C\'s preparation instinct and the i\'s need for authentic, spontaneous connection — both are real, and the best Ci performers have found a way to honour both.'
   },
   'CS': {
     title: 'Institutional builder, structured stabiliser, long-term process architect',
@@ -2400,7 +2437,7 @@ const ROLES_16 = {
       'Public Speaker / Keynote Presenter — high-visibility, high-spontaneity, high-energy public performance',
       'Brand Manager — creative, perception-driven, low-precision and high-ambiguity work',
     ],
-    why:   'CS profiles build organisations that outlast any individual who works in them. Your combination of analytical precision and patient, systematic reliability produces institutional infrastructure — processes, systems, standards, documentation — that continues to add value long after you have moved on. You are most effective in roles where long-term consistency is the primary measure of success, where the cost of error is high, and where the organisation genuinely values the stability you create. The most important career consideration for CS profiles is finding environments where that stability is treated as a strategic asset — because in fast-moving, high-novelty cultures, the CS profile's greatest strengths are frequently undervalued until they are absent.'
+    why:   'CS profiles build organisations that outlast any individual who works in them. Your combination of analytical precision and patient, systematic reliability produces institutional infrastructure — processes, systems, standards, documentation — that continues to add value long after you have moved on. You are most effective in roles where long-term consistency is the primary measure of success, where the cost of error is high, and where the organisation genuinely values the stability you create. The most important career consideration for CS profiles is finding environments where that stability is treated as a strategic asset — because in fast-moving, high-novelty cultures, the CS profile\'s greatest strengths are frequently undervalued until they are absent.'
   },
 };
 
@@ -3233,5 +3270,25 @@ function buildCharts(R) {
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display:true, position:'bottom', labels:{ boxWidth:10, padding:12, font:{size:11}, color:'#666' } } },
-        scales: { r: { min:0, max:80, ticks:{ stepS
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: { boxWidth: 10, padding: 10, font: { size: 11 }, color: '#666' }
+          }
+        },
+        scales: {
+          r: {
+            min: 0, max: 100,
+            ticks: { stepSize: 25, callback: v => v + '%', font: { size: 9 }, color: '#aaa' },
+            grid: { color: 'rgba(0,0,0,0.06)' },
+            pointLabels: { font: { size: 12, weight: '700' }, color: '#444' }
+          }
+        }
+      }
+    });
+  }
+}
+</script>
+</body>
+</html>
